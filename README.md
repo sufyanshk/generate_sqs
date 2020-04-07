@@ -6,7 +6,7 @@ found or not.\
 If the ````Perfect_match```` is found in the ````bestcorr.out```` file, then the code creates a file named ````````stopsqs````````.\
 If the ````mcsqs```` code is running and when it sees the file ````stopsqs````, then it cleanly stops its run.
 
-In the ````check_sqs.sh```` file you can define how much you want the ````mcsqs```` code to keep finding out the sqs'es. The time should be mentioned in seconds.
+In the ````check_sqs.sh```` file you can define for how many seconds the ````mcsqs```` code should keep finding out the sqs'es. (I have put the default as 172800 seconds which is equal to 2 days)
 
 # ATAT installation
 I suggest to install ATAT in the ````/bin/```` directory so that all the users can use it.\
