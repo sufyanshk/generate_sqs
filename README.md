@@ -8,7 +8,9 @@ If the *mcsqs* code is running and when it sees the file **stopsqs**, then it cl
 
 In the **check\_sqs.sh** file you can define how much you want the *mcsqs* code to keep finding out the sqs'es. The time should be mentioned in seconds.
 
-## ATAT installation
+### ATAT installation
+I suggest to install ATAT in the /bin/ directory so that all the users can use it.\
+If you don't edit the **makefile** of ATAT then only the user who installed ATAT can use it.
 ```bash
 cd atat
 (if OSX)
