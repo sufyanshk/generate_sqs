@@ -10,4 +10,4 @@ In the **check\_sqs.sh** file you can define how much you want the *mcsqs* code 
 
 # Disclaimer
 This program is not affiliated with ATAT. You are free to modify it, but do so at your own risk.
-I have downloaded the ATAT code from [ATAT's official website](https://www.brown.edu/Departments/Engineering/Labs/avdw/atat/)
+I have downloaded the ATAT code from [ATAT's official website](https://www.brown.edu/Departments/Engineering/Labs/avdw/atat/).
