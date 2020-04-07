@@ -1,7 +1,7 @@
 # MCSQS from ATAT
 This is just a copy of the Alloy Theoretic Automated Toolkit (ATAT) for my own reference.
 
-I have added a file named ````check\_sqs.sh```` which checks whether the ````Perfect_match```` for the correlation is
+I have added a file named ````check_sqs.sh```` which checks whether the ````Perfect_match```` for the correlation is
 found or not.\
 If the ````Perfect_match```` is found in the ````bestcorr.out```` file, then the code creates a file named ````````stopsqs````````.\
 If the ````mcsqs```` code is running and when it sees the file ````stopsqs````, then it cleanly stops its run.
@@ -14,8 +14,8 @@ If you don't edit the ````makefile```` of ATAT then only the user who installed 
 ````bash
 bash
 cd atat
-(if OSX) sed -i '' '1s/$(HOME)//' makefile
-(if linux) sed -i '1s/$(HOME)//' makefile
+(if OSX) sed -i '' '1s/\$(HOME)//' makefile
+(if linux) sed -i '1s/\$(HOME)//' makefile
 make
 make install
 ````
