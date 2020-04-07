@@ -8,6 +8,17 @@ If the *mcsqs* code is running and when it sees the file **stopsqs**, then it cl
 
 In the **check\_sqs.sh** file you can define how much you want the *mcsqs* code to keep finding out the sqs'es. The time should be mentioned in seconds.
 
+## ATAT installation
+```bash
+cd atat
+(if OSX)
+	sed -i '' '1s/$(HOME)//' makefile
+(if linux)
+	sed -i '1s/$(HOME)//' makefile
+make
+make install
+```
+
 # Disclaimer
 This program is not affiliated with ATAT. You are free to modify it, but do so at your own risk.
 I have downloaded the ATAT code from [ATAT's official website](https://www.brown.edu/Departments/Engineering/Labs/avdw/atat/).
