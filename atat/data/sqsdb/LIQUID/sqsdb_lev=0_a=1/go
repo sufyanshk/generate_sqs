@@ -1,0 +1,6 @@
+#!/bin/bash
+if [[ ! -e bestsqs.in ]]
+then
+    mv bestsqs.out bestsqs.in
+fi
+cellcvrt.exe -uss=../supcel.in < bestsqs.in  | cellcvrt.exe -ja=0.05 > bestsqs.out

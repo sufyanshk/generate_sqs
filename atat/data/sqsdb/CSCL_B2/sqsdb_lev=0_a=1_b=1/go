@@ -1,0 +1,4 @@
+corrdump -nop -noe -2=10.0 -3=7.15 -4=7.15 -ro -l=rndstr.in  -clus ; getclus
+
+
+

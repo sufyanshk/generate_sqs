@@ -1,0 +1,3 @@
+x y z a
+-y x-y z+1/3 a
+-x+y -x z+2/3 a

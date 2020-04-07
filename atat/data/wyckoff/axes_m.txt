@@ -1,0 +1,2 @@
+#const a=; b=; c=; beta=;
+{a} {b} {c} {90} {beta} {90}

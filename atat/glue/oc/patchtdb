@@ -1,0 +1,6 @@
+#/bin/bash
+cat - > tmp.tdb
+grep FUNCTION tmp.tdb | awk 'BEGIN {n=0;} {printf "s/%s/FUNC%04i/g\n",$2,n; n++}' > tmp.sed
+cat tmp.tdb | awk '/^ELEMENT/ {printf " ELEMENT %-2s   %-24s %f %f %f !\n",$2,$3,$4,$5,$6;} ! /^ELEMENT/ {print $0;}' |\
+ sed -e 's/^PHASE/ PHASE/g' -e 's/^FUNCTION/ FUNCTION/g' -e 's/^CONSTITUENT/    CONSTITUENT/g' -e 's/^PARAMETER\(.*\)N !/   PARAMETER\1N REFDUM !/g' | sed -f tmp.sed
+rm tmp.tdb tmp.sed

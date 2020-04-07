@@ -1,0 +1,12 @@
+#!/bin/bash
+#SBATCH --time=12:00:00
+#SBATCH -p maint-batch
+
+#SBATCH --tasks-per-node=8
+#SBATCH -J B4_lev2_2
+
+for (( id=0 ; id<8 ; id++ ))
+do
+  mcsqs -n=48 -wr=20 -wn=0.75 -wd=2 -ip=$id &
+done
+wait

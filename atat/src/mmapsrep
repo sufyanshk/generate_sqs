@@ -1,0 +1,119 @@
+#!/bin/csh
+if ( "x$1" == "x-h" ) then
+  echo Display the output of mmaps in graphical form.
+  echo "Syntax: mmapsrep [-e] c1 c2 c3"
+  echo where c1,c2,c3 are the column numbers of the compositions to plot
+  echo the optional switch -e tells the code to plot structures flagged with error too.
+  exit
+endif
+
+if ( "x$1" == "x-e" ) then
+  grep e predstr.out | grep -v b >! error.out
+  set a = "$2"
+  set b = "$3"
+  set c = "$4" 
+else
+  echo -n "" >! error.out
+  set a = "$1"
+  set b = "$2"
+  set c = "$3" 
+endif
+
+set NC = `head -n 1 fit.out |awk '{print NF}'`
+set ce = `head -n 1 fit.out |awk '{print NF-4}'`
+set pe = `head -n 1 fit.out |awk '{print NF-3}'`
+set re = `head -n 1 fit.out |awk '{print NF-2}'`
+
+if (-e gs_lines.out) then
+  rm -f gs_lines.out
+endif
+
+#cat gs_connect.out | awk '{system("grep "$1" gs.out >> gs_lines.out; grep "$2" gs.out >> gs_lines.out; grep "$3" gs.out >> gs_lines.out; grep "$1" gs.out >> gs_lines.out; echo  \"\\n\" >> gs_lines.out")}'
+awk 'BEGIN {while (getline < "gs.out") {n=split($0,a); pt[a[n]]=$0;}} {n=split($0,a); for (i=1; i<=n; i++) {print pt[a[i]];} print pt[a[1]]; print "";}' gs_connect.out > gs_lines.out
+
+#cat maps.log
+getclus -e | grep -v '^0' | grep -v '^1' >! clusinfo.out
+#grep "^2" clusinfo.out >! eci2.out
+#grep "^3" clusinfo.out >! eci3.out
+#grep "^4" clusinfo.out >! eci4.out
+grep g predstr.out >! newgs.out
+cat - >! mapsrep.gnu << END
+set title "Fitted Energies"
+unset border
+unset xtics
+unset ytics
+
+set view equal xy 
+#center=(.5,sqrt(3)/6,0.0)
+#unset key
+END
+if ( `cat newgs.out | wc -l` == 0 ) then
+  cat - >> mapsrep.gnu <<END
+ splot  './gs_lines.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$pe) t "known gs" w lp pt 4, \\
+	'./fit.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$pe) t "known str" w p pt 1, \\
+	'./predstr.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "predicted" w p pt 0
+END
+else
+  cat - >> mapsrep.gnu <<END
+ splot  './gs_lines.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$pe) t "known gs" w lp pt 4, \\
+	'./fit.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$pe) t "known str" w p pt 1, \\
+	'./newgs.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "predicted gs" w p pt 3, \\
+	'./predstr.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "predicted" w p pt 0
+END
+endif
+cat - >> mapsrep.gnu <<END
+pause -1
+set title "Calculated Energies"
+END
+if ( `cat error.out | wc -l` == 0 ) then
+cat - >> mapsrep.gnu <<END
+ splot  './gs_lines.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "known gs" w lp pt 4, \\
+	'./fit.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "known str" w p pt 1
+END
+else
+cat - >> mapsrep.gnu <<END
+ splot  './gs_lines.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "known gs" w lp pt 4, \\
+	'./fit.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "known str" w p pt 1, \\
+	'./error.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "error" w p pt 3
+END
+endif
+
+cat - >> mapsrep.gnu <<END
+pause -1
+set title "Calculated and Fitted Energies"
+ splot  './fit.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$ce) t "calculated" w p pt 1, \\
+	'./fit.out' u (0.5*(2*\$$b+\$$c)/(\$$a+\$$b+\$$c)):(sqrt(3)/2*(\$$c)/(\$$a+\$$b+\$$c)):(\$$pe) t "fitted" w p pt 3 
+pause -1
+set border
+set xlabel "diameter"
+set xtics
+set ytics
+set ylabel "energy"
+set title "ECI vs cluster diameter"
+set nokey
+set xzeroaxis
+set xtics ("pair" 0,"5" 5,"10" 10,"15" 15, "trip" 20,"5" 25,"10" 30,"15" 35, "quad" 40,"5" 45,"10" 50,"15" 55)
+plot [-5:60] 'clusinfo.out' u ((\$1-2)*20.+\$2):(\$4)
+pause -1
+
+set title "Residuals of the fit (same order as in fit.out)"
+set xtics autofreq
+set ylabel "energy"
+set xlabel "line number in fit.out"
+plot 'fit.out' u (\$$re)
+pause -1
+set title "Fitted vs Calculated Energies"
+set ylabel "predicted energy"
+set xlabel "actual energy"
+set nokey
+plot \
+'fit.out' u (\$$ce):(\$$pe) w p pt 1,x w l lt 0
+pause -1
+END
+
+gnuplot mapsrep.gnu
+if ( $status == 1 ) then
+  echo Error running gnuplot or ...
+  echo You do not have gnuplot installed.
+  echo You can download gnuplot from "http://www.gnuplot.info/"
+endif

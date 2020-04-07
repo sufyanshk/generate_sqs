@@ -1,0 +1,3 @@
+Set z=1/4. Assume touching spheres of identical atoms.
+    (c/2)^2 = (a/2)^2 + (c/4)^2
+        c/a = sqrt(4/3)

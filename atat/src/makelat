@@ -1,0 +1,69 @@
+#!/bin/csh
+source ~/.atat.rc
+
+if ( $#argv == 0 || x$1 == "x-h" ) then
+  cat - <<EOF
+MAKE LATtice, by Axel van de Walle
+Utility setting up directories with maps input files for a given alloy system
+and for one or multiple lattices.
+
+Syntax: makelat [-o] [-s=scale] atom1,atom2,... lattice1,lattice2,...
+
+Make sure that there are commas but no spaces between atoms and similarly between the lattices.
+
+Examples:
+  makelat Al,Ni bcc,fcc
+  makelat Ca,Mg:O rocksalt
+
+  (note the : to separate sublattices)
+  The default scale is 1. It can be changed to allow for units other than angstroms.
+  The -o option outputs to strout.
+
+Lattices available:
+EOF
+  echo `ls -1 $atatdir/data/*.lat | sed 's/.lat//g' | sed 's+.*/++g'`
+
+echo ""
+echo Other lattices can be added in the $atatdir/data/ directory or
+echo new atomic radius can be added in the $atatdir/data/radii.in file.
+
+  exit 1
+endif
+
+set scale=1
+set tostdout=0
+
+while ( $#argv != 0 )
+  switch ("$1")
+    case "-s":
+      set scale=$2
+      shift;
+      breaksw;
+    case "-o":
+      set tostdout=1
+      breaksw;
+    default:
+      break;
+      breaksw;
+  endsw
+  shift
+end
+
+set sedcmd=`echo $1 | sed 's/:/ /g' | blanktonl | awk 'BEGIN {c='65';} {printf("-e 's=XX%cXX=%s=g' ",c,$1); c++}'`
+
+foreach lat (`echo $2 | sed 's/,/ /g'`)
+  if (! -e $atatdir/data/$lat.lat ) then
+    echo Lattice $lat cannot be found in $atatdir/data/
+    exit
+  endif
+
+  set dirname=`echo $1 | sed -e 's/,//g' -e 's/:/_/g'`_`echo $lat | sed 's+.*/++g'`
+  cat $atatdir/data/$lat.lat | sed 's/\([A-Z]\)/XX\1XX/g' | sed $sedcmd > lat.tmp
+  if ( $tostdout == 0 ) then
+    mkdir -p $dirname
+    nntouch -s=$scale -l=lat.tmp -r=$atatdir/data/radii.in > $dirname/lat.in
+  else
+    nntouch -s=$scale -l=lat.tmp -r=$atatdir/data/radii.in
+  endif
+    rm -f lat.tmp
+end

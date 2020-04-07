@@ -1,0 +1,60 @@
+#!/bin/bash
+
+echo | awk 'BEGIN {
+minT='$1';
+maxT='$2';
+ticTstep='$3';
+ticsize=0.05;
+ticstep=0.25;
+print "# vtk DataFile Version 3.0\nvtk output\nASCII\nDATASET POLYDATA";
+npt=6;
+for (T=minT; T<=maxT+ticTstep/2.; T+=ticTstep) {npt+=6;}
+for (t=0; t<=1.01; t+=ticstep) {npt+=6;}
+print "POINTS" , npt , "float";
+s60=sqrt(3.)/2.;
+c60=0.5;
+for (T=minT; T<=maxT+(maxT-minT)/2.; T+=maxT-minT) {
+  print T,0,0;
+  print T,1,0;
+  print T,c60,s60;
+}
+ntic=0;
+for (t=0; t<=1.01; t+=ticstep) {
+  print minT,t,0;
+  print minT,t+c60*ticsize,-s60*ticsize;
+
+  print minT,1-t*c60,t*s60;
+  print minT,1-t*c60+c60*ticsize,t*s60+s60*ticsize;
+
+  print minT,c60*(1.-t),s60*(1.-t);
+  print minT,c60*(1.-t)-ticsize,s60*(1.-t);
+
+  ntic+=3;
+}
+for (T=minT; T<=maxT+ticTstep/2.; T+=ticTstep) {
+  print T,0,0;
+  print T,-s60*ticsize,-c60*ticsize;
+
+  print T,1,0;
+  print T,1+s60*ticsize,-c60*ticsize;
+
+  print T,c60,s60;
+  print T,c60,s60+ticsize;
+
+  ntic+=3;
+}
+nln=9+ntic;
+print "LINES ",nln,nln*3;
+print 2,0,1;
+print 2,1,2;
+print 2,2,0;
+print 2,3,4;
+print 2,4,5;
+print 2,5,3;
+print 2,0,3;
+print 2,1,4;
+print 2,2,5;
+for (i=0; i<ntic; i++) {
+print 2,6+2*i,6+2*i+1;
+}
+}' > axes.vtk

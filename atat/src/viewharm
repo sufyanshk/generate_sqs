@@ -1,0 +1,22 @@
+#!/bin/csh
+cat - > viewclus.gnu <<EOF
+unset key
+set term png
+set out 'sh.png'
+set size 0.75,1
+#set view ,,,1.5
+set cbrange [-1.0:1.0]
+unset colorbox
+unset border
+unset xtics
+unset ytics
+unset ztics
+#set pm3d scansautomatic 
+set pm3d at s
+set pm3d scansbackward
+set nosurf
+splot 'sh.tmp' u 1:2:3:4 w l
+#pause -1
+EOF
+gnuplot viewclus.gnu
+pngtopnm < sh.png |  pnmsmooth -h 7 -w 7 | pnmcrop -margin 20 > shclus${1}.pnm

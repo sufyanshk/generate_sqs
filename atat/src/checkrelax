@@ -1,0 +1,32 @@
+#!/bin/csh
+if ( x$1 == "x-h" ) then
+  cat <<EOF
+Prints the amount of relaxation each structure in */str_relax.out has
+undergone, relative to */str.out (or */str_sup.out if it exists)
+Typically, values above 0.1 are considered too much for the
+cluster expansion to be applicable and the offending structures
+should be disabled using the command:
+ touch structure_number/error
+where structure_number is the appropriate directory name.
+The option -1 checks relaxations for one structure only in the current directory.
+
+This command measures the magnitude of the strain that need to be applied
+to the unit cell of str.cell to get the unit cell of str_relax.out,
+neglecting (i) isotropic scaling and (ii) rigid rotation.
+The numbers reported are the sqrt of the sum of each element of the strain tensor squared.
+EOF
+  exit
+endif
+if ( x$1 == "x-1" ) then
+    set reffile="str_sup.out"
+    if ( ! -e $reffile ) then
+	set reffile="str.out"
+    endif
+   ( cat $reffile | cellcvrt -f | head -3 ; cat str_relax.out | cellcvrt -f | head -3 ) | checkcell -q
+else
+  echo -n "" >! tmpcheckrelax.out
+  foreachfile str_relax.out echo \`pwd\` \`checkrelax -1\`  >>! tmpcheckrelax.out
+  cat tmpcheckrelax.out | sed 's+.*/++g' | awk '{print $2,$1}' | sort -n
+  rm -f tmpcheckrelax.out
+endif
+

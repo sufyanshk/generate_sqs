@@ -1,0 +1,156 @@
+#!/bin/csh
+
+# This script makes use of a wrap file (located in either the current directory
+# or up to 3 directories up) as well as an "str.out" file (in the current directory)
+# generated from MAPS. With these files we run CASTEP and then extract the energy of
+# the structure which is placed in a file called "energy" in the current directory.
+# If the calculation fails, an empty file called "error" will be created instead.
+
+# Initial version created: 11/08/2011.  Author: Aaron Hopkinson (a.hopkinson89@gmail.com)
+# This script is heavily based on the runstruct_abinit and runstruct_vasp scripts
+# provided with ATAT.
+#
+# Revision: 14/10/2011. Updated extract_castep (change of variable names, division of
+# energy by total number of ions) and fixed typo in the comment above.
+
+source ~/.atat.rc
+set strout = "str.out"
+set wrapfilename = "castep.wrap"
+set seedname = "temp"
+set cellfile = "$seedname.cell"
+set paramfile = "$seedname.param"
+set extractfilename = "$seedname.castep"
+
+# Loop over command line arguments to set script mode.
+while ( $#argv != 0 )
+  switch ( "$1" )
+    case "-h":
+      cat - <<EOF
+runstruct_castep [-w file1] [-nr] [-ex file2] [-clean] cmdprefix
+  Where file1 is an optional alternate wrap file (default: castep.wrap)
+  and file2 is the .castep file for energy to be extracted from.
+    If the wrap file is not found in the current directory,
+    it searches in the parent directories .. and ../.. and ../../..
+  -nr means do not run castep, just generate input files.
+  -ex means do not generate cell and param files, do not run CASTEP, but extract info from a CASTEP output file.
+  -clean deletes ALL CASTEP output files: CAUTION.
+  cmdprefix is the prefix needed for CASTEP to run on a remote machine,
+            such as "node -s node2" 
+  Script contributed by Matt Probert matt.probert@york.ac.uk
+EOF
+      exit 1
+      breaksw
+    case "-w":
+      set wrapfilename="$2"
+      shift
+    breaksw;
+    case "-nr":
+      set notruncastep
+    breaksw;
+    case "-ex":
+      set extractonly
+      set extractfilename="$2"
+      shift
+    breaksw;
+    case "-clean":
+      set clean
+    breaksw;
+    default:
+      break;
+  endsw
+  shift
+end
+
+# Look for ~/.runstruct_castep.rc file to get necessary command to run CASTEP.
+# If this does not exist, create a new one.
+if ( -e ~/.runstruct_castep.rc ) then
+  source ~/.runstruct_castep.rc
+else
+  cat - >! ~/.runstruct_castep.rc <<EOF
+#!/bin/csh
+# Enter the name of the CASTEP executable here.
+set CASTEPCMD = castep
+EOF
+  echo "A default ~/.runstruct_castep.rc file has been created. Please edit this to match your configuration."
+  exit 1
+endif
+
+# Look for str.out file (current dir), give error if it cannot be found.
+if ( ! -e $strout ) then
+  echo "str.out does not exist."
+  echo "Please restart the program from a directory containing str.out."
+  exit 1
+endif
+
+# Look for wrap file containing necessary CASTEP parameters.
+# Check current directory or up to 3 levels up. If it cannot be found, print error.
+set wrapfile="$wrapfilename"
+if ( ! -e $wrapfile ) then
+  set wrapfile="../$wrapfilename"
+  if ( ! -e $wrapfile ) then
+    set wrapfile="../../$wrapfilename"
+    if ( ! -e $wrapfile ) then
+      set wrapfile="../../../$wrapfilename"
+      if ( ! -e $wrapfile ) then
+        echo "You need a $wrapfilename file in $PWD , $PWD/.. , $PWD/../.. or $PWD/../../.."
+        echo "Please restart the program from a directory where $wrapfilename can be found."
+        exit 1
+      endif
+    endif
+  endif
+endif
+
+# MAPS requires this for CASTEP to run on a remote machine.
+set CMDPREFIX = "$1"
+
+# Not in extract only mode:
+if ( ! $?extractonly ) then
+  echo "Generating input files.."
+
+  # Generate the .param file from the .wrap file.
+  set paramlines = `grep -n "\[param\]" $wrapfile | sed -e 's/\([0-9]*\)\(.*\)/\1/g'`
+  tail -n +`expr $paramlines + 1` $wrapfile >! $paramfile
+
+  # Now generate the .cell file. Firstly by extracting the coordinates from str.out
+  # and using cellcvrt (included with ATAT) to convert to necessary format for CASTEP.
+  echo "%block lattice_cart" >! $cellfile
+  cat $strout | cellcvrt -c -ns=1 -sig=9 | head -n 6 | tail -n 3 >>! $cellfile
+  echo "%endblock lattice_cart" >>! $cellfile
+  echo "" >>! $cellfile
+  echo "%block positions_abs" >>! $cellfile
+  cat $strout | cellcvrt -c -ns=1 -sig=9 | tail -n +7 | sed -e 's/\([-0-9\.]*[ ]*[-0-9\.]*[ ]*[-0-9\.]*\)\([ ]*\)\([A-Za-z]*\)/\3\2\1/g' >>! $cellfile
+  echo "%endblock positions_abs" >>! $cellfile
+
+  # Add in the extra parameters from the .wrap file.
+  echo "" >>! $cellfile
+  head -n `expr $paramlines - 1` $wrapfile | tail -n +2 >>! $cellfile
+
+  # If not-not running CASTEP: ie: We ARE running CASTEP..
+  if ( ! $?notruncastep ) then
+    # Run CASTEP:
+    echo "Running CASTEP Geometry Optimisation.."
+    $CMDPREFIX $CASTEPCMD $seedname
+
+    # Use external script to extract the energy and check for errors. (External because it is used below as well)
+    source $atatdir/glue/castep/extract_castep
+    
+    # $run == 3 when extract_castep is finished - explained in there.
+    if ( $run == 3 ) then
+      # If we don't want to clean, at least move CASTEP output to a new directory for neatness.
+      # Default action in case people want to analyse runs.
+      if ( ! $?clean ) then
+        echo "Moving CASTEP output files to $PWD/castep_files.."
+        mkdir castep_files >& /dev/null
+        mv $seedname.* *.usp castep_files
+      else
+        # Otherwise, delete output.
+        echo "Removing CASTEP output files.."
+        rm -f $seedname.* *.usp
+      endif
+    endif
+  endif
+else
+  # Extract energy from a previously generated .castep file.
+  source $atatdir/glue/castep/extract_castep
+  exit
+endif

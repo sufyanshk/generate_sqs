@@ -1,0 +1,1002 @@
+#!/usr/bin/perl
+
+#use strict;
+
+# Initial setup of global variables
+
+# read config file to know where atat directory is
+my $atatdir;
+BEGIN {
+    open(my $cf,"<",join('/',$ENV{"HOME"},".atat.rc")) or die "Can't open ~/.atat.rc\n";
+    $atatdir = <$cf>;
+    chomp $atatdir;
+    $atatdir =~ s/.*atatdir\s*=\s*//g;
+    our $libdir = join('',$atatdir,"/src");
+}
+
+# load libraries from atat/src/
+
+use lib $libdir;
+
+use Permutor;
+use PowerSet;
+use PowerSet 'powerset';
+
+#process command line
+
+my %cmdline; #this will contained all command line options, hashed by the option name (e.g. -l, etc.)
+for (my $i=0; $i<@ARGV; $i++) {
+    my @opt = split /=/, $ARGV[$i];
+    if ( @opt == 1 ) {$opt[1]=1}
+    $cmdline{$opt[0]}=$opt[1];
+}
+
+# end of global var setup
+# go the "Main" section below
+
+#subroutine to setup a directory of the SQS database (-mk option)
+sub makemanysqs() {
+    if (! -e "sqsgen.in") {# if input file does not exist create a template for user to edit
+	print qq{
+Please create a sqsgen.in file of the form (for example):
+level=0	a=1		b=1		[...]
+level=1	a=1		b=0.5,0.5	[...] 
+level=1	a=0.5,0.5 	b=1		[...]
+level=2	a=0.5,0.5	b=0.5,0.5	[...]
+[...]
+where a,b,... would the wyckoff positions for each site (append a number if two different sites have the same letter)
+and where the concentration could have more than two values (e.g. 0.33333,0.33333,0.33333).
+You will still need to run mcsqs in each subdirectory created that has fractional occupation.
+};
+        print join("","See ",$atatdir,"/","data/sqsdb/"," for examples.");
+        exit;
+    }
+    open(my $fh,"<","sqsgen.in") or die "Unable to open gensqs.in"; # to read sqs compositions, one per line
+    while (<$fh>) {
+	chomp;
+	my $dirname=$_; # will contain sqs directory name
+	my @cols = split /\s+/, $_ ; # split by whitespace separated columns
+	my @levs = split /=/, $cols[0]; # sqs level is in 1st column
+	my %siteocc; #will contain concentrations for each site, hashed by site wyckoff name
+	for (my $i=1; $i<@cols; $i++) { # loop over sites (i.e. columns 2,3,...) to get concentrations
+	    my @rawsite = split /=/, $cols[$i]; # split site=concentration_list
+	    my $atom="A"; # atom labels start at A
+	    my @allconc = split /,/, $rawsite[1]; # parse coma-separated concentrations
+	    @allconc = reverse sort @allconc; # sort from highest to lowest concentration
+	    $siteocc{$rawsite[0]}=""; # will contain a string of all occupations (concentrations) for current site
+	    for (my $at=0; $at<@allconc; $at++) { #loop over concentrations for current site
+		my $com="";              # put comas only between items
+		if ($at > 0) {$com=",";} #
+		$siteocc{$rawsite[0]}=join('',$siteocc{$rawsite[0]},$com,$rawsite[0],"_",$atom,"=",$allconc[$at]); # append site_atom=conc
+		$atom++; # A,B,C,...
+	    }
+	}
+	$dirname =~ s/^\s*level/lev/; #cleanup directory name level->lev
+	$dirname =~ s/\s+/_/g;        # whitespaces to _
+	$dirname =~ s/^/sqsdb_/;      # sqsdb_ prefix
+	print $dirname,"\n"; # report directory being made
+	mkdir $dirname;
+	{
+            # open unit cell structure
+	    open(my $sf,"<","rndstr.skel") or die "Can't open rndstr.skel (should contain unit cell of structure in ATAT format with lowercase Wyckoff position as atom names)";
+	    open(my $of,">",join('/',$dirname,"rndstr.in")); # will contain the input file for mcsqs
+	    while (<$sf>) {
+		chomp;
+		my @cols = split /\s+/, $_ ; # split each line by whitespace-separated columns
+		if ( $cols[3] =~ /[a-z]/ ) { # if line has an atom label in colunm 4
+		    print $of $cols[0]," ",$cols[1]," ",$cols[2]," ",$siteocc{$cols[3]},"\n"; # replace wykoff site name with list of all concentrations for site
+		}
+		else {
+		    print $of $_,"\n"  ; #otherwise copy line as is
+		}
+	    }
+	}
+    }
+    system("cd sqsdb_lev=0_*; cellcvrt -ro < rndstr.in  >| bestsqs.out"); # special case: for end members no need to generate sqs: just copy unit cell
+}
+
+#subroutine to copy sqs from database to current directory
+sub copysqs() {
+    #find where to get sqs from (from -l command-line option )
+    my $sqsdbdir=join("",$atatdir,"/","data/sqsdb/",$cmdline{"-l"});
+
+    #if a master species.in file in give in current directory, read it
+    my $masterspecies="";
+    {
+	if (-e "species.in") {
+	    open(my $sh,"<","species.in");
+	    $masterspecies=<$sh>;
+	    chomp $masterspecies;
+	}
+    }
+    if (exists $cmdline{"-sp"}) {
+	$masterspecies=$cmdline{"-sp"};
+	if (! -e "species.in") {
+	    open(my $sh,">","species.in");
+	    print $sh $masterspecies . "\n";
+	}
+    }
+
+    if (! $masterspecies eq "") {
+	print "Using species: ",$masterspecies,"\n";
+    }
+
+    #make a string with list of (Wyckoff) sites in sqs, each followed with "=" and master list of species (elements)
+    my $specskel;
+    {
+	open(my $fh,"<",join("",$sqsdbdir,"/sqsgen.in")) or die "can't open sqsgen.in \n";
+	$specskel=<$fh>;
+	$specskel =~ s/^level[^\s]*[\s]*//g;
+	$specskel =~ s/=[0-9.,+-]*/=$masterspecies/g;
+    }
+    
+    #create directory and template species.in file if nonexistant and exit.
+    if (!chdir($cmdline{"-l"})) {
+	mkdir($cmdline{"-l"});
+	chdir($cmdline{"-l"});
+	open(my $sf,">","species.in");
+	print $sf $specskel;
+	print "Edit the file ",$cmdline{"-l"},"/species.in (if needed) and rerun the same command.\n";
+	exit;
+    }
+
+    #read the species.in file (were now are in the subdirectory given by -l option)
+    my @sites; #will contain array of all sites (a site is a sublattice in CALPHAD nomenclature)
+    my %spec;  #each entry (hashed by site name from @sites) will contain a reference to an array of the species on each site
+    my %perm;  #each entry (hashed by site name from @sites) will point to an object that generates all permutation on species on a site
+    {
+	my @rawsite ;
+	open(my $sf,"<","species.in") or die "can't open species.in";
+	@rawsite = split /\s+/, <$sf>;   # the different sites are whitespace separated
+	for (my $s=0; $s<@rawsite; $s++) {  # for each site, parse the species
+	    my @asitespec = split /=/ , $rawsite[$s] ; #split site=species
+	    my $site=$asitespec[0];
+	    @sites=(@sites,$site); #grow array of sites
+	    $spec{$site} = [ split /,/ , $asitespec[1] ]; #record the array of species for current site
+	    $perm{$site} = new List::Permutor @{$spec{$site}}; #make permuter object for current site
+	}
+    }
+    #read the multiplicities from sqsdb of each site and place them in mult.in
+    {
+        open(my $mh,">","mult.in");
+        foreach my $s ( @sites ) { #loop over sites
+	    open(my $sh,join('',$sqsdbdir,"/rndstr.skel")); #this file contains all sites (with equivalent sites repeated)
+            my $m=0;
+	    while (<$sh>) {
+		my @cols=split /\s+/, $_;
+		if ($cols[3] eq $s) {$m++;} #count number of time site $s appears
+	    }
+            print $mh $s,"=",$m,"\t";
+        }
+        print $mh "\n";
+    }
+    
+    #read in the wyckoff sites of the sqs that are equivalent by symmetry (only happens in simple structures, e.g. B2)
+    my @equivsite; #this will contain an array of statements of equivalence between wyckoff positions, e.g. a=b,c=b
+    {
+	if (-e "$sqsdbdir/equiv.in") {
+	    open(my $eh,"<","$sqsdbdir/equiv.in");
+	    while (<$eh>) {
+		chomp;
+		push @equivsite,$_; #add new entry to array
+	    }
+	}
+    }
+
+    #read the different sqs in the db
+    my @sqslist=(); #this will contain names of all unique sqs
+    # this file list all available sqs compositions
+    open(my $fh,"<",join("",$sqsdbdir,"/sqsgen.in")) or die "can't open sqsgen.in \n";
+    while (<$fh>) { #loop over sqs
+	chomp;
+	# each line contain sqs level followed by site=compo,compo,... (repeated for each site)
+	my $dirdbname=$_; # will contain the sqs directory name to copy form the database
+	my @cols = split /\s+/, $_ ; #level and sites are whitespace separated
+	my @levs = split /=/, @cols[0]; # split level=number
+	if ($levs[1] <= $cmdline{"-lv"}) { # if level is below what specified by -lv command line option
+	    my %siteocc; # this will contain references to arrays of the occupations (compositions) for each site, hashed by site name
+	    for (my $i=1; $i<@cols; $i++) { # loop over all sites
+		my @arawsite = split /=/, @cols[$i]; #split into site name and composition list
+		my @allconc = split /,/, @arawsite[1]; #parse composition list and put into array
+		@allconc = reverse sort @allconc; # by convention list higher composition first
+		$siteocc{@arawsite[0]}=[ @allconc ]; # record all occupations for this site
+	    }
+	    #cleanup and make directory name
+	    $dirdbname =~ s/^\s*level/lev/;
+	    $dirdbname =~ s/\s+/_/g;
+	    $dirdbname =~ s/^/sqsdb_/;
+	    
+	    #check if the current sqs does not have too many possible occupations for the given number of species, at each site
+	    my $nbok=1;
+	    foreach my $site ( @sites ) {
+		if ( @{$spec{$site}} < @{$siteocc{$site}}) {$nbok=0; last;}
+	    }
+	    #if the nb of occupation and species are ok
+	    if ($nbok) {
+		while (1) { #loop over permutations of the species on each site
+		    #        this is needed if the number of species in the database sqs is smaller than the nb of species desired
+		    #        example: A,B,C alloy with binary sqs => need sqs for A,B and B,C and A,C
+		    #make sqs name in the calculation directory
+		    my $sqsname=""; # will contain the name of the sqs calc directory
+		    foreach my $site (@sites) {
+			my @aspec=$perm{$site}->peek; # get all species for that site in the current permutation order
+			my @speclist=();
+			for (my $i=0; $i<@{$siteocc{$site}}; $i++) {
+			    # add an entry of the form site_specie=occupation
+			    @speclist = (@speclist,join('',$site,"_",$aspec[$i],"=",@{$siteocc{$site}}[$i]));
+			}
+			@speclist = sort @speclist; #put wyckoff sites in alphabetical order
+			$sqsname=join(',',$sqsname,join(',',@speclist));
+		    }
+		    $sqsname =~ s/^,//; # remove extra , in front
+		    #sqsname now completed, except for prefix
+
+		    my $onespeconly=1; # flag that will indicate if it is an end member that might reduce to a simpler parent lattice
+		    my $onespecname=""; # will contain name of species on simpler parent lattice
+		    if (@sites==1) {$onespeconly=0;} # if only one sublattice cannot be equivalent to higher symmetry phase
+		    else {
+			foreach my $site (@sites) {
+			    my @aspec=$perm{$site}->peek; # get all species for that site in the current permutation order
+			    # this block checks if the end member reduces to a simpler known parent lattice
+			    if (@{$siteocc{$site}}>1) { # only one specie one sublattice?
+				$onespeconly=0; #no: cannot be simple lat
+			    }
+			    else {
+				if ( $onespecname eq "" ) {
+				    $onespecname=$aspec[0]; # first time around, store specie name on 1st sublattice
+				}
+				else { # next time around, check if the same specie is on the other sublattices
+				    if ( $onespecname ne $aspec[0] ) {$onespeconly=0;} # if not, cannot reduce to simpler lattice
+				}
+			    }
+			}
+		    }
+
+		    # now check if that sqs is not equivalent to another one under permutation of equivalent sites
+		    my $alreadylisted=0; #flag to indicate the sqs is redundant
+		    my $sqspermname=""; #will contain various sqs with sites permuted
+		    my $equivpowset = new Data::PowerSet(@equivsite); #we will select arbitrary subsets of site equivalence relations
+		    while (my $equivon= $equivpowset->next) { #loop over subset of site equiv relations
+			my %mapsite; # will contain how each wyckoff site is mapped onto another
+			for my $s (@sites) {$mapsite{$s}=$s;} #initialize identity mapping
+			for my $ss (@$equivon) { # loop over equivalences
+			    my $a=$ss;
+			    $a =~ s/=.*//g; # site a is before =
+			    my $b=$ss;
+			    $b =~ s/.*=//g; # site b is after =
+			   $mapsite{$a}=$b; # record permutation of those sites
+			   $mapsite{$b}=$a; 
+			}
+			$sqspermname=""; # will contain sqs name with permuted sites
+			foreach my $oldsite (@sites) { #loop over sites before permutation
+			    my $site=$mapsite{$oldsite}; #permuted site name
+			    my @aspec=$perm{$site}->peek; #get species for that site
+			    my @speclist=(); #construct sqs name as before
+			    for (my $i=0; $i<@{$siteocc{$site}}; $i++) {
+				@speclist = (@speclist,join('',$oldsite,"_",$aspec[$i],"=",@{$siteocc{$site}}[$i])); #use old site label with occupations of permuted site
+			    }
+			    @speclist = sort @speclist; # wyckoff sites in alphabet order
+			    $sqspermname=join(',',$sqspermname,join(',',@speclist));
+			}
+			$sqspermname =~ s/^,//;
+			#sqspermname now completed
+			#print  $sqspermname,"\n";
+			if ( grep(/^$sqspermname$/, @sqslist) == 1 ) {$alreadylisted=1; last;} # if permuted site sqs was already in list
+		    }
+		    #print $alreadylisted,"\n";
+		    #print "list=\n",join("\n",@sqslist),"\nend\n";
+		    if ( grep(/^$sqsname$/, @sqslist) == 0 ) { #if (unpermuted) sqs is not in list
+			push @sqslist,$sqsname; # add to list
+			my %subatom; # will contain which to put in which site (hashed by wyckoff_x where x=A,B,C,... the generic atom names in sqs db)
+			foreach my $site (@sites) { #loop over sites
+			    my @aspec=$perm{$site}->peek; # species for current permutation
+			    for (my $atom="A", my $i=0; $i < @{$siteocc{$site}}; $atom++, $i++) {
+				$subatom{join("_",$site,$atom)}=$aspec[$i]; #set, e.g., subatom{"b_A"}="Cu"
+			    }
+			}
+			# put prefix and create dir
+			$sqsname = "sqs_lev=" . $levs[1] . "_" . $sqsname;
+			mkdir($sqsname);
+			if ( $alreadylisted == 1 ) { #if equivalent to permuted sqs, write a link to it
+			    open(my $lh,">","$sqsname/link");
+			    print $lh "sqs_lev=" . $levs[1] . "_" . $sqspermname . "\n";
+			}
+			else { #otherwise copy all files needed for calc
+			    if ( ! -e "$sqsname/str.out" ) { #only do if didn't exist before
+				print "Preparing ",$sqsname," directory\n";
+				{
+				    open(my $sqsf,">",join("",$sqsname,"/str.in")) or die "Can't open str.in\n"; #destination file
+				    open(my $dbf,"<",join("",$sqsdbdir,"/",$dirdbname,"/bestsqs.out")) or die "Can't open bestsqs.out file.\n"; #origin file from database
+				    while (<$dbf>) { #loop over lines in origin file
+					chomp;
+					my @cols = split /\s/, $_ ; #split into columns
+					if ( $cols[3] =~ /[a-z]/ ) { #if 4th column contains a site, replace it by the correct atom from subatom
+					    print $sqsf $cols[0]," ",$cols[1]," ",$cols[2]," ",$subatom{$cols[3]},"\n";
+					}
+					else { # otherwise copy as is
+					    print $sqsf $_,"\n";
+					}
+				    }
+				}
+				# check if structure has higher symmetry after sites are decorated
+				my $hisym=0;
+				{
+				    open(my $osf,join("","cellcvrt -sym < ",$sqsdbdir,"/",$dirdbname,"/bestsqs.out | head -n 1 |"));
+				    my $osym=<$osf>;
+				    chomp $osym;
+				    open(my $fsf,join("","cellcvrt -sym < ",$sqsname,"/str.in |& grep -v Warning | head -n 1 |"));
+				    my $fsym=<$fsf>;
+				    chomp $fsym;
+				    if ( $osym < $fsym ) {
+					print "Equivalent to another high-symmetry structure: ",$sqsname,"\n";
+					$hisym=1;
+				    }
+				    #print "sym= ",$osym," ",$fsym," ",$hisym,"\n";
+                                }
+				if ($hisym) {
+				    open(my $bf,">",$sqsname ."/bump");
+                                    print $bf "";
+				}
+				# isotropically stretch str.in so that atoms just touch and put in str.out
+				my $cmd=join("","nntouch -l=",$sqsname,"/str.in -r=",$atatdir,"/data/radii.in >| ",$sqsname,"/str.out");
+				system($cmd);
+				if ($levs[1]==0) {  # for end members also write "endmem" file as a flag
+				    open (my $emf,">",join("",$sqsname,"/endmem"));
+				    print $emf "";
+				}
+				if ($onespeconly == 1) { # if this end member can be reduced to a simpler lattice
+				    if (open(my $plf,"<",$sqsdbdir . "/" . "parentlat.in")) { #check if this simpler lattice is known in the sqs db
+					my $linkto=<$plf>; # read lattice and partial structure name (e.g. FCC_A1/sqs_lev=0_a_)
+					chomp $linkto;     
+					$linkto = $linkto . $onespecname . "=1"; # add specie name to partial structure name
+					open(my $lf,">",$sqsname ."/link"); # write a suitable link file
+					print $lf $linkto . "\n";
+					print "link to parent lattice: " . $linkto . "\n"; # notify user
+				    }
+				}
+				else { # if not known, then needs to be computed
+				    open (my $wf,">",join("",$sqsname,"/wait")); #write "wait" file as a flag to mark as "to be computed"
+				    print $wf "";
+				}
+			    }
+			}
+		    }
+		    # increment to the next permutation of species
+		    my $doneperm=1;
+		    foreach my $a ( @sites ) { #try to permute one site at the time
+			my @set = $perm{$a}->next ;
+			if ( $perm{$a}->peek ) {$doneperm=0; last;} #stop as soon as one permutation was possible
+			$perm{$a}->reset; #if reach end of permutation, restart at first permutation for that site
+		    }
+		    if ( $doneperm ) {last;} #if all sites reached their last permutation, we're at the end
+		}
+	    }
+	}
+    }
+}
+
+#subroutine to fit ab initio data, combine with sgte and create tdb file for one phase
+sub fittdb() {
+    # SECTION 1: read all input files
+    my @sites; # will contain names of each Wyckoff site (a site is a sublattice in CALPHAD nomenclature)
+    my %spec; # will contain reference to array of possible species sitting on site, for each site (hashed by Wyckoff site)
+    {
+	my @rawsite ;
+	open(my $sf,"<","species.in") or die "Can't open species.in"; #read from species.in for one lattice
+	@rawsite = split /\s+/, <$sf>; #sites are whitespace separated
+	for (my $s=0; $s<@rawsite; $s++) {
+	    my @asitespec = split /=/ , $rawsite[$s] ; # format is site=specie,specie
+	    my $site=$asitespec[0]; #first site name
+	    @sites=(@sites,$site); #add to list of sites
+	    $spec{$site} = [ split /,/ , $asitespec[1] ]; #parse comma separated list of species and record it for that site
+	}
+    }
+
+    my %mult; #will contain multiplicity of each site per unit cell (hashed by Wyckoff site)
+    my $totsite; #will contain total numer of site per unit cell
+    {
+	open (my $mh,"<","mult.in") or die "can't open mult.in";
+	my @cols = split /\s+/ , <$mh>;  #sites are whitespace separated
+	foreach my $m (@cols) { #loop over sites
+	    my @tok = split /=/, $m; #parse site=mult
+	    $mult{$tok[0]}=$tok[1]; # record multiplicity for that sie
+	    $totsite+=$tok[1]; # increment total number of site
+	}
+    }
+    my @terms; #will contain all types of interaction terms as a 3d array
+    # The first index is the type of interaction (i.e. which line of the terms.in file)
+    # The second index is the site (as an integer, not a wyckoff symbol)
+    # the last index is 0 or 1, with [0] giving the order (1: linear in composition, 2: binary interaction, etc.)
+    #                            and [1] giving the level (e.g. order of polynomial in a binary interaction)
+    {
+	if (! -e "terms.in") { # if terms.in file does not exist, make a default one and output some help
+	    open(my $tf,">","terms.in");
+	    print $tf join(':',map { "1,0" } @sites) . "\n";
+	    print qq{Please edit the file terms.in
+Each entry on one line has the form order,level:order,level:...
+in which sublattices are separated by :
+and where order has the following meaning: 1: linear in composition 2: binary interaction, 3: ternary interaction, etc.
+and where level is the maximum value of the additional parameter in a tdb file specifying the order of the polynomial used.
+In a binary interaction, level can be 0,1,2,3,...
+In a ternary interaction, level can be 0,1
+In higher order interaction level can only be 0
+(These are limitations of the tdb format.)
+};
+	    exit;
+	}
+	open(my $tf,"<","terms.in") or die "Can't open terms.in";
+	my $l=0;
+        while (<$tf>) {
+	    chomp;
+	    my @atermraw = split /[:]+/, $_  ; # each site is separated by :
+	    @atermraw = ( @atermraw , map { "0,0" } @sites  ); # pad with 0,0 for all sites that the user did not specify
+	    my @aterm = map { [ split /,+/ ] } @atermraw ; # split each order,level pair into two array entries
+	    $terms[$l]=[ @aterm[0..@sites-1] ]; # cut extraneous 0,0 that were padded and record cleanup terms in $terms for line $l
+	    $l++; # next line in file
+	}
+    }
+
+    my %stablephase; # will contain the stable room temperature phase of each element, hashed by element name
+    {
+        open(my $sh,"<",$atatdir . "/data/sgte_elements.tdb"); #fetch from atat data directory
+        while (<$sh>) {
+          chomp;
+          my @col=split /\s+/, $_;
+          $col[1] =~ s/ELEM_//g;
+          $stablephase{$col[1]}=$col[2];
+       }
+    }
+
+    # SECTION 2: create input file for least squares fit
+    my @tdbparam; # will contain all interaction terms of the tdb file, each in the form specie,specie,...:specie,specie,...:...;level
+    my $bumpval=5e-3; # energy shift to avoid degeneracies between low symmetry end members and high symmetry ones.
+    if ($cmdline{"-bv"} != 0) {
+        $bumpval=$cmdline{"-bv"};
+    }
+
+    my @propname=("energy","svib_ht"); # input files that we will fit
+    my @propsuf=("","*T"); #suffix they need in tdb file
+    my $idealgas=8.3144621;
+    my @propnum=(1.60217653e-19*6.02214078e23,-$idealgas); #conversion factor from ab initio units to tdb units: eV/atom -> J/mol and k_B -> J/(K mol)
+    for my $aprop (@propname) { # loop over properties
+	open(my $dh,"ls -d sqs_* |"); # list all sqs directories  - we'll read them from handle dh
+	open(my $mh,">","x_" . $aprop . ".in");        # file will contain regressors for least-squared fit
+	open(my $eh,">","y_" . $aprop . ".in");        # file will contain dependent variable for least-squared fit
+	open(my $mn,">","strname_" . $aprop . ".out"); # file will contain structures included in fit of this property
+	open(my $ch,">","conc_" . $aprop . ".out");    # file will contain overall concentrations of structures included in fit of this property
+	my $founddata=0;
+	while (<$dh>) { # loop over sqs directories
+	    chomp;
+	    my $dirname=$_; # get directory name
+            my $olddirname=$dirname; # name before redirection
+            if ( -e "$dirname/link" ) { # if find a link to another directory, use that directory instead
+                 open(my $lh,"<","$dirname/link");
+                 print $dirname,"  mapped to ";
+                 $dirname=<$lh>;
+                 chomp $dirname;
+                 if ( ! -e $dirname ) {
+                    $dirname = "../" . $dirname;
+                 }
+                 print $dirname,"\n";
+            }
+	    my $concname=$_; # start to extract concentrations from sqs name
+	    $concname =~ s/sqs_//g; # trim prefixes
+	    $concname =~ s/lev=[^_]+_//g;
+	    
+	    my %conc; # this will contain all concentrations for this sqs (hashed by Wyckoff site and then hashed by species)
+	    my %overconc; # this will contain overall concentration for this sqs (hashed by species)
+	    foreach my $s (@sites) { #initialize all concentrations to 0
+		$conc{$s}={};
+		for my $sp ( @{$spec{$s}} ) {
+		    ${$conc{$s}}{$sp}=0;
+                    $overconc{$sp}=0;
+		}
+	    }
+	    
+	    my $badconc=0;
+	    my @rawcs=split /,/ , $concname ; # concentation are coma separated and have the form site_specie=number
+	    foreach my $rawc (@rawcs) {
+		my @piece=split /=/ , $rawc; # parse so that piece[0]=site_specie and piece[1]=number
+		my @lab=split /_/, $piece[0]; # parse so that lab[0]=site and lab[1]=specie
+		if (! exists ${$conc{$lab[0]}}{$lab[1]}) {$badconc=1;} #can't find such a composition
+		${$conc{$lab[0]}}{$lab[1]}=$piece[1]; #record the site composition
+                $overconc{$lab[1]}+=$piece[1]*$mult{$lab[0]}/$totsite; # increment overall composition
+	    }
+	    if ( ! -e join('',$dirname,"/",$aprop)) { # check if property aprop is available for current sqs
+		$badconc=1;
+	    }
+	    
+	    if ($badconc) { # if anything went wrong, skip
+		print $dirname," skipped for property " . $aprop . "\n";
+	    }
+	    else { # otherwise process
+		$founddata=1; # we have found at least one data point
+		print $dirname,"\n"; # report structure used
+		print $mn $dirname,"\n";
+		{
+		    open(my $es,"<",join('',$dirname,"/str.out")) or die "can't open " . $dirname . "/str.out\n"; #read structure file
+		    my $totsitesup=0; # will contain total number of atoms (i.e. site)
+		    while (<$es>) { # loop over lines
+			my @cols=split /\s+/, $_; # split in columns
+			if ( $cols[3] =~ /[a-zA-Z]/ ) { # if line contain atom label, count it
+			    $totsitesup++;
+			}
+		    }
+		    open(my $ef,"<",join('',$dirname,"/",$aprop)); # read property (e.g. energy)
+		    my $energy=<$ef>;
+                    chomp $energy;
+                    # if directory contains file bump, bump energies by bumpval per atom (to avoid degeneracies at end members);
+                    if ( $aprop eq "energy" && -e join('',$olddirname,"/bump") ) { # check for bump in dir before redirection
+                        $energy+=$bumpval*$totsitesup;
+                    }
+                    # add code here for bump
+		    my $energypercell=($energy*$totsite/$totsitesup); # convert per unit cell
+		    print $eh $energypercell,"\n"; # record property value in dependent variable file for fitting
+                    for my $el ( sort keys %overconc ) {print $ch $overconc{$el},"\t";}
+                    print $ch "\n";
+                    open(my $eo,">",join('',$dirname,"/",$aprop,"_cell")); # record in a *_cell file too
+		    print $eo $energypercell,"\n";
+		}
+		
+		@tdbparam=(); # clear thermo database param (from previous interaction calculation )
+		my %doneterm; # to keep track of terms already processed
+		foreach my $rterm (@terms) { # loop over possible interaction terms
+		    #print "rterm="; #
+		    #foreach my $tt (@{$rterm}) {print @{$tt}[0],":";} #
+		    #print "\n"; #
+		    my $perm = new List::Permutor @{$rterm}; # will consider all assignements of terms to sublattices (i.e. sites)
+		    while (my @term=$perm->next) { # loop over permutation of terms
+			my $hiord=0; # will contain highest level of interaction
+                        # sanity checks
+			for (my $s=0; $s<@term; $s++) {
+			    if ($term[$s][0]==3 && $term[$s][1]>0) { $term[$s][1]=2; } # higher order param for ternaries are indexed by 0,1,2 so 2 is higher limit
+                            # check if only one higher order param
+			    if ($term[$s][1]>0 && $hiord>0) {die "TDB format only allows one higher order parameter.\n";}
+			    if ($term[$s][1]>0) {$hiord=$term[$s][1];}
+			}
+			my @nterm; # will contain the number of components for each term (1=one component, 2=binary, 3=ternary, etc.) indexed by site number
+			my %ordterm; # will contain the level for each interaction, indexed by site (ord=level in this section of the code)
+			my $ns=0; # to loop over site number
+			my $toohi=0; # flag if interaction involves more components than there are on the site
+			foreach my $s (@sites) { # loop over sites
+			    $nterm[$ns]=@{$term[$ns]}[0]; #copy nb of component
+			    if (@{$term[$ns]}[0]>@{$spec{$s}}) {$toohi=1;} # flag if too many components
+			    $ordterm{$s}=@{$term[$ns]}[1]; # copy level of interaction
+			    $ns++; # next site
+			}
+			my $kterm=join('_',@nterm); #create label to check if done
+			if (! $toohi==1 && ! exists $doneterm{$kterm}) { # if not flagged and not done
+			    $doneterm{$kterm}=1; # mark as done
+			    
+			    my %powset; # will contain objects to find all subset of a set of species on a site, hashed by site name
+			    my $ns=0; # site number
+			    foreach my $s (@sites) { # loop over sites
+				$powset{$s} = new Data::PowerSet ({min=>$nterm[$ns], max=>$nterm[$ns]}, @{$spec{$s}}); # find all subsets of $nterm[$ns] species
+				$ns++; # next site
+			    }
+			    while (1) { # loop over subsets of species
+				for (my $ord=0; $ord<=$hiord; $ord++) { # loop over levels of interactions
+				    my $acc=1.; # to accumulate the product of compositions
+				    my @atdbparam; # will contain the label of the interaction as specie,specie,...:specie,specie,...:...
+				    foreach my $s ( @sites ) { # loop over sites
+					my $elem=$powset{$s}->peek; # which species (elements) take part in that interaction
+					$atdbparam[@atdbparam]=(@{$elem}==0 ? "*" : join(',',@{$elem})); # add elem,elem,...  at the end of the label or * if no element
+					foreach my $e ( @{$elem} ) { # do the product of compositions of all elements $e involved on site $s
+					    $acc*=${$conc{$s}}{$e};
+					}
+                                        # handle higher level interaction
+					if (@{$elem}==2 && $ordterm{$s}>0) { # for binary interactions include terms of the form (X_A-X_B)^$ord
+					    $acc*=(${$conc{$s}}{@{$elem}[0]}-${$conc{$s}}{@{$elem}[1]})**$ord;
+					}
+					if (@{$elem}==3 && $ordterm{$s}>0) { # for ternary interactions, use CALPHAD convention
+					    my $comp=0;
+					    for (my $i=0; $i<3; $i++) { # sum all compositions involved (may be <1 for higher-order systems)
+						$comp+=${$conc{$s}}{@{$elem}[$i]}
+					    }
+					    my $v=${$conc{$s}}{@{$elem}[$ord]}+(1-$comp)/3.; # contribution is X_{A,B or C} + (1-sum composition)/3
+					    $acc*=$v; #accumulate product
+					}
+				    }
+				    $tdbparam[@tdbparam]=join('',join(':',@atdbparam),';',$ord); # record interaction name as specie,specie,...:specie,specie,...:...;level
+				    print $mh $acc,"\t"; # record regressor for this interaction
+				}
+                                # find next subset
+				my $donepower=1;
+				foreach my $s ( @sites ) { # try for each site
+				    $powset{$s}->next; # go to next subset for this site
+				    if ( $powset{$s}->peek ) {$donepower=0; last;} # if possible, we have found next subset choice
+				    $powset{$s}->reset; # if not possible restart at first subset for this site and try next site
+				}
+				if ( $donepower ) {last;} # if all sites are at their last subset, we are done with exploring interactions
+			    }
+			}
+		    }
+		}
+		print $mh "\n"; # put next interaction on the next line
+	    }
+	}
+        if ($founddata==1) { # if we have some data, do the fit
+	    system("lsfit -x=x_" . $aprop . ".in -y=y_" . $aprop . ".in -colin >| param_" . $aprop . ".out; sleep 1"); # least square fit of parameters in param_[property].out
+            # report some quality measures in fit_[property].out
+	    system("lsfit -x=x_" . $aprop . ".in -y=y_" . $aprop . ".in -colin -p -ty -e | sed 's/ /\t/g' >| fit.tmp");
+	    system("paste conc_" . $aprop . ".out fit.tmp strname_" . $aprop . ".out >| fit_" . $aprop . ".out; rm fit.tmp ; sleep 1");
+            #  and cv_[property].out
+	    system("lsfit -x=x_" . $aprop . ".in -y=y_" . $aprop . ".in -colin -cv >| cv_" . $aprop . ".out");
+	}
+	else { # if have no data
+	    print "Found no data for " . $aprop . "\n";
+            # create a param_[propery].out file with as many 0 as there are parameters
+	    open(my $ph,">","param_" . $aprop . ".out");
+	    print $ph map {"0\n"} @tdbparam;
+	}
+    }
+
+    # concatenate (by columns) all the param_[property].out files into allparam.out
+    system("paste " . join(' ',map {"param_" . $_ . ".out"} @propname) . " >| allparam.out");
+
+    # SECTION 3: Create tdb file
+    {
+	my $Tmin="298.15"; # default lowest and highest temperature cutoffs
+	my $Tmax="10000";
+        if ( exists $cmdline{"-Tu"} ) {
+	    $Tmax=$cmdline{"-Tu"};
+	}
+        if ( exists $cmdline{"-Tl"} ) {
+	    $Tmin=$cmdline{"-Tl"};
+	}
+	my $phase=`pwd`; # create phase name from current directory name without upper directory name
+	chomp($phase);
+	$phase =~ s/.*\///g;
+	
+        my @exphase; # will contain which phases should not be loaded from SGTE
+        if (-e "../exfromsgte.in") { # this optional file lists the phases to not load from SGTE
+            open(my $xh,"<","../exfromsgte.in");
+            @exphase=<$xh>;
+            chomp(@exphase);
+            print "SGTE Phases excluded: ",join(' ',@exphase),"\n";
+        }
+
+	my $volden=1; #to nomalize all properties per cell
+        my $issgtephase=0; #flag
+	if (system(join('',"grep -q \'^PHASE ",$phase," \' ",$atatdir,"/data/sgte_phases.tdb"))==0) { # check if phase is in SGTE database
+	    $volden=$totsite; # for sgte phase there is always one atom per cell (even for hcp...)
+            $issgtephase=1;
+	}
+	
+	my @endfunc;  # will contain gibb free energy functions for end members in tdb format
+	my %elemfunc; # will contain free energy reference shifter (to make elemental free energy match sgte), hashed by REF_phase_element
+	my @xsparam;  # will contain excess quantities of mixing terms
+        my @ratiocoef=(1,-2,1.5,-0.5);
+        my $sroterm="";
+        my $coord=0;
+        {
+          if (open(my $zh,"<",$atatdir . "/data/sqsdb/" . (uc $phase) . "/coord.in")) {
+             $coord=<$zh>;
+          }
+          else {
+            print "No SRO included.\n";
+          }
+        }
+        my %paramall;
+        {
+	  open(my $pf,"<","allparam.out"); # read in fitted numerical parameters
+	  foreach my $termord (@tdbparam) { # loop over terms
+            my $allp=<$pf>; #read in all parameters for that term
+	    chomp $allp;
+            $paramall{$termord}=$allp;
+          }
+        }
+
+	foreach my $termord (@tdbparam) { # loop over terms
+	    my $term=$termord; # get term 
+	    $term =~ s/;.*//g; # without the level
+            my $ord=$termord; # get level
+            $ord =~ s/.*;//g; # without the term
+	    my $allp=$paramall{$termord}; #fetch all parameters for that term
+	    my @p=split /\s+/, $allp; # put white space-separated parameters in array p
+	    my $pdb=""; # will contain the function corresponding to that term
+            my $needtoaddord2=0;
+	    for (my $i=0; $i<@propname; $i++) { # loop over properties (energy, entropy)
+		my $coef=$p[$i]*$propnum[$i]/$volden; # convert units and normalize per cell
+		$pdb=$pdb . ($coef !=0 || $i==0 ? ($coef >= 0 ? "+" : "") . ($coef) . $propsuf[$i] : ""); # make function expression +coef*suffix and append to pdb
+                if ( $cmdline{"-sro"}>0 &&  $propsuf[$i] eq "" && $coord != 0 && ($term =~ s/,/,/g)==1 ) {
+                   if ($ord==0) {
+                     my $Gab;
+                     {
+                       my @coef2=split /\s+/,$paramall{"$term;2"};
+                       $coef2[0]*=$propnum[$i]/$volden;
+                       $Gab=abs($coef-$coef2[0])*$cmdline{"-sro"};
+                     }
+                     my $c=$Gab/($coord*$idealgas);
+                     my @tmpsroterm;
+                     for (my $s=0; $s<=2; $s+=2) {
+                       for (my $n=0; $n<4; $n++) {
+                         $tmpsroterm[$s] = $tmpsroterm[$s] . "+" . (($s-1)*$ratiocoef[$n]*$Gab/2.0) . ($n==0 ? "" : "*EXP(" . (-$n*$c) . "*T**(-1))");
+                       }
+                       $tmpsroterm[$s] =~ s/\+-/-/g;
+                     }
+                     $pdb = $pdb . $tmpsroterm[0];
+                     $sroterm=$tmpsroterm[2];
+                     if ( ("$term;2" ~~ @tdbparam)==0 ) {
+                        $needtoaddord2=1;
+                     }
+                   }
+                   elsif ($ord==2) {
+                     $pdb = $pdb . $sroterm;
+                   }
+                }
+	    }
+	    if ($term =~ /,/ || $term =~ /\*/) { # if it is an excess term
+		push @xsparam,join('',"PARAMETER L(",uc $phase,",",uc $termord,") ",$Tmin," ",$pdb," ; ",$Tmax," N !"); #create parameter tdb command
+                if ($needtoaddord2) {
+   		   push @xsparam,join('',"PARAMETER L(",uc $phase,",",uc $term,";2) ",$Tmin," ",$sroterm," ; ",$Tmax," N !"); #create parameter tdb command
+                }
+	    }
+	    else { # if it is an end member term (no coupling between atoms)
+		my @elem=split /:/, $term; #parse species (elements) from : separated list
+		my %conc; # will contain overall concentration of each species (not site-specific)
+		for (my $n=0; $n<@sites; $n++) { # loop over sites
+		    $conc{$elem[$n]}+=$mult{$sites[$n]}/$volden; # add to concentration (accounting for multiplicity of site and per cell normalization)
+		}
+		my $fname=join('',"ABIN_",$phase,"_",$term); # make function name for ab initio end member data: ABIN_phase_elementlist
+		$fname =~ s/://g; # remove : from list
+		push @endfunc,join('',"FUNCTION ",uc $fname," ",$Tmin," ",$pdb," ; ",$Tmax," N !"); #create function tdb command
+		
+		my $line=join('',"PARAMETER G(",uc $phase,",",uc $termord,") ",$Tmin," ",uc $fname); # will contain parameter tdb command for current term
+                # now shift with reference states (so that elemental free energies match sgte)
+		foreach my $e (sort keys %conc) { # loop over species (elements) involved in this term
+		    my $elemref=join('',"REF_",uc $phase,"_",uc $e); # create label of reference free energy shifter for element
+                    my $curstabphase; # will contain the stable phase used as a shifter
+		    my $elemsgte=join('',"SGTE_",uc $phase,"_",uc $e); # create label of sgte free energy for element
+                    if (($issgtephase==1 || $cmdline{"-os"}) && ! grep {/^$elemsgte$/} @exphase) { # if (current phase in sgte or -os specified) and not excluded by user
+                       $curstabphase=$phase; # use current phase as shifter
+                    }
+                    else {                                                                         # otherwise
+                      if ($issgtephase==1) {print "Exclude SGTE data for: ",$elemsgte,"\n";} # notify sgte not used for current phase
+		      $curstabphase=$stablephase{uc $e}; # use instead the stable phase of this element as reference
+                    }
+                    my $elemabin=join('',"ABIN_",uc $curstabphase,"_",uc $e); # make label for ab initio free energy for reference phase
+		    $elemsgte=join('',"SGTE_",uc $curstabphase,"_",uc $e);    # make label for sgte free energy for reference phase
+		    $line=join('',$line,"-",$conc{$e},"*",$elemref); # subtract reference free energy shifter for current element weighted by concentration
+		    $elemfunc{$elemref}=join('',"FUNCTION ",$elemref, " ",$Tmin," ",$elemabin," - ",$elemsgte," ; ",$Tmax," N !"); # add this element reference free energy shifter to list
+		}
+		$line=join('',$line," ; ",$Tmax," N !"); # finish tdb command
+		push @xsparam,($line); # record current line to tdb file
+	    }
+	}
+	open(my $tf,">","$phase.tdb"); # now write tdb file for current phase
+	print $tf "PHASE ",$phase," % ",scalar(keys %mult)," "; # write PHASE tdb command with number of sublattice
+	foreach my $s (@sites) {
+	    print $tf $mult{$s}/$volden," "  # output multiplicity per cell of each sublattice
+	}
+	print $tf " !\n"; # finish tdb command
+	print $tf "CONSTITUENT ",$phase," :"; # write CONSTITUENT tdb command for current phase
+	foreach my $s (@sites) { # look over sublattices
+	    my $frst=1;
+	    foreach my $at (@{$spec{$s}}) { # loop of species (elements)
+		if (!$frst) {print $tf ",";} # comma separated, except before first element
+		$frst=0;
+		print $tf uc $at; # list atom
+	    }
+	    print $tf ":"; # sublattice are : separated
+	}
+	print $tf "!\n"; # finish tdb command
+	print $tf join("\n",@endfunc),"\n"; # output all ab initio free energies for end members
+	print $tf join("\n",values %elemfunc),"\n"; # output all end member reference free energy shifters
+	print $tf join("\n",@xsparam),"\n"; # output all excess free energy terms
+    }
+}
+
+# subroutine to combine multiple phases into a single tdb file
+sub comb_phases() {
+    my $mysed=" | grep -v -e '^#' -e '^\$' | sed -e 's/<NL>/\\n/g' -e 's/ELEM_//g' "; # filter to create valid tdb file (eliminate comments expand newlines remove ELEM_)
+
+    open(my $eh,"grep -H '^CONSTITUENT ' */*.tdb | sed -e 's/^[^:]*:[^:]*://g' -e 's/: *!//g' -e 's/[:,]/\\n/g' | sort -u |"); #list all unique elements found in files */*.tdb
+    my @allelem=<$eh>; # slurp all lines into array of element names
+    chomp @allelem;
+    @allelem = map uc,@allelem; # cleanup: no newline and uppercase
+    print "Found elements ",join(' ',@allelem),"\n"; # report elements found
+    my $togrepe="grep " . join('',(map {"-e \'ELEM_" . $_ . " \' "} @allelem)). $atatdir . "/data/sgte_elements.tdb"; # command to fetch elemental data from sgte database
+    system($togrepe . "$mysed >| tmp.tdb"); # copy to our tdb file after cleanup filter
+
+    open(my $ph,"cat */*.tdb | grep SGTE_ | sed 's/.*SGTE_\\([^ ]*_\\)\\([^ _]*\\) .*/\\1ELEM_\\2/g' | sort -u |"); # list all unique phase needing sgte data in */*.tdb
+    my @allsgtephase=<$ph>; # slurp all phases into array
+    chomp @allsgtephase;
+    @allsgtephase = map uc,@allsgtephase; # cleanup: no newline and uppercase
+    my $phaselist = join(' ',@allsgtephase); #make phase list to report to user
+    $phaselist =~ s/ELEM_//g;
+    print "Phases found in SGTE database: ",$phaselist,"\n";
+    my $togrepp="grep " . join('',(map {"-e \'" . $_ . " \' "} @allsgtephase)). $atatdir . "/data/sgte_freee.tdb"; # fetch sgte free energy functions for each phase 
+    system($togrepp . $mysed . " >> tmp.tdb"); # append to tdb file
+
+    print "Using:\n";
+    system("ls -1 */*.tdb"); # report which files are being used
+    system("cat */*.tdb >> tmp.tdb"); # catenate all */*.tdb available files
+
+    $togrepp =~ s/_ELEM_([^ ]*) /,ELEM_\1/g;
+    system($togrepp . $mysed . " >> tmp.tdb"); # fetch additional sgte data if any (for magnetic and gas phases)
+
+    my $tdbfile=join('',join('_',@allelem),".tdb"); # make final tdb file name
+    if (-e "subref.sed") { # if user-defined substitution rules exist
+	system(join('',"sed -f subref.sed tmp.tdb >| ",$tdbfile)); # apply them to file
+    }
+    else {
+	system(join('',"mv tmp.tdb ",$tdbfile)); # otherwise just move
+    }
+    if ($cmdline{"-oc"}) { # make open calphad compliant if -oc specified
+	system("mv " . $tdbfile . " tmp.tdb");
+	system(q{grep FUNCTION tmp.tdb | awk 'BEGIN {n=0;} {printf "s/%s/FUNC%04i/g\n",$2,n; n++}' > func.sed});
+        system(q{cat tmp.tdb | awk '/^ELEMENT/ {printf " ELEMENT %-2s   %-24s %f %f %f !\n",$2,$3,$4,$5,$6;} ! /^ELEMENT/ {print $0;}' | sed -e 's/^PHASE/ PHASE/g' -e 's/^FUNCTION/ FUNCTION/g' -e 's/^CONSTITUENT/    CONSTITUENT/g' -e 's/^PARAMETER\(.*\)N !/   PARAMETER\1N REFDUM !/g' | sed -f func.sed |
+          awk '{maxlen=77;
+          line =$0;
+          while (length(line)>maxlen) {
+            cut=maxlen;
+            while (1) {
+              while (index(" -+",substr(line,cut,1)) == 0) {cut--;}
+              if(substr(line,cut-1,1)!="E") break;
+              cut--;
+            }
+            print substr(line,1,cut-1);
+            line="    " substr(line,cut);
+          }
+          print line;
+          }' > } . $tdbfile);
+	system("rm tmp.tdb func.sed");
+
+
+
+    }
+}
+
+# help
+sub print_help() {
+    my $version;
+    {
+	open(my $vh,"grep define.MAPS_VERSION $atatdir/src/version.hh |");
+	$version = <$vh>;
+	chomp $version;
+	$version =~ s/.*\"(.*)\".*/\1/g;
+    }
+    print "sqs2tdb version " . $version;
+    print qq{ by Axel van de Walle and with contributions to the SQS database
+        from Ruoshi Sun, Qijun Hong and Sara Kadkhodaei.
+
+Usage: sqs2tdb [options]    where the available options are:
+-h   : More help.
+-cp  : Copy SQS from the database to the current directory. Must specify:
+       -lv=[level]
+           level indicates how fine of composition mesh to use (0: only end members, 1: mid points, etc.)
+       -l=[lattice]
+          Available lattices
+};
+    system("ls ${atatdir}/data/sqsdb/ | sed 's/^/           /g'");
+    print qq{
+        Optional: -sp=Element,Element,...  to indicate which elements to consider
+                      (otherwise read from species.in if it exists).
+-fit : Fit solution model from SQS energies (to be run within the desired lattice directory).
+-tdb : Combine solution models from one or multiple lattices into a single .tdb file.
+       add the -oc (Open Calphad) option to generate a more portable tdb file.
+-mk  : Generate input file for SQS generation with mcsqs. (Usually not needed - only for experts.)
+       To be run in the SQS database directory:
+};
+    print "       ",join("",$atatdir,"/","data/sqsdb/","[lattice name]\n");
+    print qq{Note that -h,-mk,-cp,-fit,-tdb are mutually exclusive.
+};
+    print qq{
+
+For more information see user guide published in:
+  A. van de Walle, R. Sun, Q.-J. Hong, and S. Kadkhodaei.
+  Software tools for high-throughput calphad from first-principles data.
+  Calphad, 58:70, 2017.
+  https://doi.org/10.1016/j.calphad.2017.05.005
+(Also, this paper should be cited in any publication resulting from this code's use.)
+};
+    if ($cmdline{"-h"}) {
+	print q{
+EXAMPLES
+
+-> A simple session of sqs2tdb could be:
+
+cp ~/atat/example/vasp.wrap .
+emacs vasp.wrap   #edit as needed
+
+echo Al,Ni > species.in
+
+sqs2tdb -cp -l=FCC_A1 -lv=1
+sqs2tdb -cp -l=FCC_A1 -lv=1
+
+cd FCC_A1
+foreachfile wait pwd \; runstruct_vasp
+
+sqs2tdb -fit
+
+Edit the file terms.in to read
+1,0
+2,0
+
+sqs2tdb -fit
+
+cd ..
+
+(repeat the above for other lattices if necessary)
+
+sqs2tdb -tdb
+
+The file AL_NI.tdb would contain a valid .tdb file.
+
+-> In a more advanced example, the runstruct_vasp command could be replaced
+by a job script submission containing the runstruct_vasp command.
+
+-> When there are lattice instabilities, the runstruct_vasp could be replaced by 
+robustrelax_vasp -mk  #this is to be run only once (see robustrelax_vasp -h for instructions)
+robustrelax_vasp -id
+
+-> If phonons are to be included (for end members) one could do:
+foreachfile endmem pwd \; fitfc -si=str_relax.out -ernn=4 -ns=1 -nrr
+foreachfile -d 3 wait \; runstruct_vasp -lu -w vaspf.wrap
+   where vaspf.wrap contains parameters for a static run to calculate forces.
+foreachfile endmem pwd \; fitfc -si=str_relax.out -f -frnn=2
+foreachfile endmem pwd \; robustrelax_vasp -vib
+
+sqs2tdb -fit
+
+OPTIONAL input files (to placed in the topmost directory):
+
+    exfromsgte.in : specify which phases should NOT be copied from SGTE database
+                    (by default all phases for each relevant element are included,
+                    but you may want to use ab initio data for virtual phase)
+    subref.sed    : substitution rule (sed command to be applied to final tdb file)
+
+OUTPUT FILES
+    In addition to the *.tdb files, there is some diagnostic info available in the files fit_[property].out where property could be 
+    energy, svib_ht, etc.
+
+ADVANCED FEATURES
+    In each sqs subdirectory created, there may be a file called link that contains the path to
+    another directory where energy data can be found. This is useful if another structure is
+    known be equivalent by symmetry. This file is created by default for equivalence within a
+    given structure type can even find symmetries across structure types.
+    You can also create the file yourself and the code will follow your link.
+
+    There may also be a file called bump which indicates that a structure must be moved up in energy by the
+    amount specified by the -bv option (or 5e-3 by default) to avoid degeneracy with an equivalent higher symmetry structure.
+    This file is created by default (during the -cp step) when the code detects higher symmetry (e.g. a GAMMA_L12 phase with all sites occupied
+    with the same type of atom is just FCC). You can delete this file if the higher-symmetry structure is not in your
+    set of structures. This file is read during the -fit step.
+
+    In summary, if you see a bump file, ask yourself if you have that structure elsewhere and put an appropriate link file.
+    If you don't have that structure elsewhere, you can delete the bump file.
+    The code will still work and give the right answer if you don't do this, but it will spend  more computer time.
+
+    During the -fit step, one can specify the -sro option to include a low-order CVM approximation to the short range order.
+
+    The default lower and upper temperature limits of 298.15K and 10000K can be changed with the -Tl=... and -Tu=... options, respectively.
+};
+  }
+}
+
+#Main
+
+#parse one of the 5 main modes in which the code is operating:
+if (@ARGV == 0 || $cmdline{"-h"}) {
+    print_help();
+}
+elsif ($cmdline{"-mk"}) {
+    makemanysqs();
+    print "Directories setup\n";
+}
+elsif ($cmdline{"-cp"}) {
+    copysqs();
+    print "Copied SQSs\n";
+}
+elsif ($cmdline{"-fit"}) {
+    fittdb();
+    print "Fit completed\n";
+}
+elsif ($cmdline{"-tdb"}) {
+    comb_phases();
+    print "TDB file created\n";
+}
+else {
+    print "Please specify at least one of -mk -cp -fit -tdb or -h for help\n";
+}

@@ -1,0 +1,4 @@
+0 0 z a
+x y z b
+-y x-y z b
+-x+y -x z b

@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH --time=3:00:00
+#SBATCH --tasks-per-node=8
+#SBATCH --qos=avandewa-condo
+#SBATCH -J C3_lv2
+
+for (( id=0 ; id<8 ; id++ ))
+do
+  mcsqs -n=48 -ip=$id &
+done
+wait

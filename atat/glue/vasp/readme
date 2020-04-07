@@ -1,0 +1,12 @@
+This directory contains what is needed to glue maps and vasp together.
+
+Here are the functions of each file
+
+runstruct_vasp: main script that does everything needed to get the energy of
+                a structure. It needs the files below.
+cleanvasp: cleanup the results of a vasp run
+ezvasp:    user-friendly front-end to vasp (ezvasp -h for help)
+ezvasp.txt: help file printed by ezvasp -h must reside where ezvasp is.
+vasp.wrap: A file called vasp.wrap residing in the directory where maps is
+           started is needed to specify the parameters of the all runs.
+           This is an example of such file.

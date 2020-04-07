@@ -1,0 +1,2 @@
+#!/bin/sh
+sed 's/char \*\(.*\)="/const char \*\1="/g' | sed -e 's/char \*shortname;/const char *shortname;/g' -e 's/char \*longname;/const char *longname;/g' -e 's/char \*object_label/const char *object_label/g' -e 's/extern char \*/extern const char */g' -e 's/char \*lat_dir/const char *lat_dir/g' -e 's/char \*my_init_str/const char *my_init_str/g' -e 's/char \*puredir/const char *puredir/g' | sed 's/const const/const/g' 

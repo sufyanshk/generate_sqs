@@ -1,0 +1,12 @@
+#!/bin/bash
+#SBATCH --time=4:00:00
+#SBATCH -p batch
+
+#SBATCH --tasks-per-node=4
+#SBATCH -J mcsqs
+
+for id in [ 0 1 2 3 ]
+do
+  mcsqs -n=30 -ip=$id &
+done
+wait

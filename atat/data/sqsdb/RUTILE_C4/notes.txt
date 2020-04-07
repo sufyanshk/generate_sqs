@@ -1,0 +1,3 @@
+Set x=0.3, a typical value for rutiles. Assume touching spheres on (110) plane.
+    [0.3*sqrt(2)a]^2 = {[1/sqrt(2) - 0.3*sqrt(2)]a}^2 + (c/2)^2
+		c/a = 2*sqrt(0.1)

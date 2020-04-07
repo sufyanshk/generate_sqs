@@ -1,0 +1,423 @@
+#!/usr/bin/perl
+
+my $occommand="oc";
+
+my %cmdline; #this will contain all command line options, hashed by the option name (e.g. -T, etc.)
+for (my $i=0; $i<@ARGV; $i++) {
+    my @opt = split /=/, $ARGV[$i];
+    if ( @opt == 1 ) {$opt[1]=1}
+    $cmdline{$opt[0]}=$opt[1];
+}
+
+if ( exists $cmdline{"-h"} ) {
+    print "Usage: ocplotpd [-1f] [-nt] -n=nb_of_samples -T0=min_temperature -T1=max_temperature -tdb=tdbfile -e=element,element,...\n";
+    exit;
+}
+
+for my $tag (("-n","-T0","-T1","-tdb","-e")) {
+    if ( ! exists $cmdline{$tag} ) {
+	print "Missing " . $tag  . ". Use -h for help\n";
+	exit;
+    }
+}
+
+my $pttoofar=0.2;
+if ( exists $cmdline{"-cc"} ){
+    $pttoofar=$cmdline{"-cc"};
+}
+
+sub pddist {
+    my ($deltatemp,$pta,$ptb)=@_;
+    if ($deltatemp == 0) {$deltatemp=1;}
+    my @vpta=split /\s+/, $pta;
+    my @vptb=split /\s+/, $ptb;
+    if ($vpta[0] ne $vptb[0]) {
+	return 100.;
+    }
+    my $dist=0;
+    for (my $i=0; $i<@vpta-2; $i++) {
+	my $delta=($vpta[3+$i]-$vptb[3+$i]);
+	if ($i==0) {$delta=$delta/$deltatemp;}
+	$dist+=$delta*$delta;
+    }
+    $dist=sqrt($dist);
+    return $dist;
+}
+
+sub reorderpoints {
+    my $deltatemp=shift;
+    my $maxdist=shift;
+    my @raw=split /\n/,$_[0];
+    if (@raw==0) {return "\n";}
+    my @ord;
+    my @done;
+    my $numdone=1;
+    my $result;
+    $ord[0]=$raw[0];
+    $done[0]=1;
+    while ($numdone < @raw ) {
+	my $bestdist=1000.;
+	my $bestpt=-1;
+	my $bestend=-1;
+	for (my $i=1; $i<@raw; $i++) {
+	    if ( $done[$i] != 1 ) {
+		my $curdistbeg=pddist($deltatemp,$ord[0],$raw[$i]);
+		my $curdistend=pddist($deltatemp,$ord[@ord-1],$raw[$i]);
+		if ($curdistbeg < $curdistend) {
+		    if ($curdistbeg < $bestdist) {
+			$bestdist=$curdistbeg;
+			$bestpt=$i;
+			$bestend=0;
+		    }
+		}
+		else {
+		    if ($curdistend < $bestdist) {
+			$bestdist=$curdistend;
+			$bestpt=$i;
+			$bestend=@ord-1;
+		    }
+		}
+	    }
+	}
+	$done[$bestpt]=1;
+	$numdone++;
+	if ($bestdist > $maxdist) {
+	    $result = $result . "\n\n" . join("\n",@ord);
+	    @ord=();
+	    $ord[0]=$raw[$bestpt];
+	}
+	else {
+	    if ($bestend==0) {
+		unshift @ord, $raw[$bestpt];
+	    }
+	    else {
+		push @ord, $raw[$bestpt];
+	    }
+	}
+    }
+    $result = $result . "\n\n" . join("\n",@ord) . "\n";
+    return $result;
+}
+
+sub copy_file_to_handle {
+    my $destfh=shift;
+    my $orgfile=shift;
+    open(my $fh,"<",$orgfile);
+    while (<$fh>) {
+	print $destfh $_;
+    }
+}
+
+sub capitalize_first {
+    return uc(substr($_,0,1)) . lc(substr($_,1));
+}
+
+sub pick_phase {
+    my $data=shift;
+    my $ph1=shift;
+    my $ph2=shift;
+    my @lines=split /\n/,$data;
+    my $outl=0;
+    my @linesout;
+    for (my $l=0; $l<@lines; $l++) {
+	my $phases=$lines[$l];
+	$phases =~ s/ +.*//g;
+	$phases= ',' . $phases . ',';
+	if ( index($phases,",$ph1,") > -1 && index($phases,",$ph2,") > -1 ) {
+	    $linesout[$outl]=$lines[$l];
+	    $outl++;
+	}
+    }
+    if (@linesout==0) {
+	return "";
+    }
+    else {
+	return join("\n",@linesout)."\n";
+    }
+}
+
+sub escape_bad {
+  my $cln=shift;
+  $cln =~ s/_/-/g;
+  return $cln;
+}
+
+#main
+
+my $maxn=$cmdline{"-n"};
+my $tempmin=$cmdline{"-T0"};
+my $tempmax=$cmdline{"-T1"};
+my $tdbfile=$cmdline{"-tdb"};
+my @elem=split /[^a-zA-Z]/ , $cmdline{"-e"};
+@elem=map(capitalize_first,@elem);
+my @varelem=@elem;
+my $filelem=shift @varelem;
+{
+    open(my $fh,">","tmp.OCM");
+    print $fh "read tdb $tdbfile\n";
+    print $fh join(" ",@elem) . "\n\n";
+#    print $fh "set num\n50\n1e-6\n";
+#    print $fh "set adv dense\n";
+    print $fh "set bit global 2\n";
+    print $fh "set bit global 8\n";
+    my $tiny=2e-4;
+    for (my $n=0; $n<$maxn; $n++) {
+	my %x;
+	do {
+	    $x{$filelem}=1;
+	    for my $e (@varelem) {
+		$x{$e}=$tiny+(1-2*$tiny)*rand(1);
+		$x{$filelem}-=$x{$e};
+	    }
+	} while ($x{$filelem} < 0);
+	my $temp=$tempmin+($tempmax-$tempmin)*rand(1);
+	print $fh "set cond t=" . $temp . " p=1e5 n=1 " . join("",(map("x(" . $_ . ")=" . sprintf("%1.4f",$x{$_}) . " " , @varelem))) . "\n";
+	print $fh "calc equil\n\n";
+	print $fh "list\n\n\n";
+    }
+    print $fh "fin\n";
+    close($fh);
+}
+system("$occommand < tmp.OCM > tmp.oco");
+{
+    open(my $oh,"<","tmp.oco");
+    my %phaseindex;
+    my $curphaseindex=0;
+    my $temp=0;
+    my $bad=0;
+    my @ptbyphase;
+    my $tielines;
+    while (<$oh>) {
+	if ( index($_,"not a valid equilibrium") != -1 || index($_,"Error") != -1 ) {$bad=1;}
+	my @c=split /\s+/ , $_;
+	if ( $c[0] eq "T=" ) {
+	    $temp=$c[1];
+	}
+	if ( $c[0] eq "Name" ) {
+	    my @equil;
+	    my @allphase;
+	    my $nbphase=0;
+	    while (1) {
+		my $line=<$oh>;
+		my @c=split /\s+/, $line;
+		if ( $c[0] eq "" || $c[0] =~ /OC.*/ ) {last;}
+		my $phase=$c[0];
+		$phase =~ s/\.*$//g;
+		$phase =~ s/_AUTO.*//g;
+		if ( ! exists $phaseindex{$phase} ) {
+		    $curphaseindex++;
+		    $phaseindex{$phase}=$curphaseindex;
+		}
+		$line=<$oh>;
+		chomp $line;
+		@c=split /\s+/, $line;
+		my %conc;
+		for (my $i=1; $i<@c; $i+=2) {
+		    $conc{$c[$i]}=$c[$i+1];
+		}
+		$equil[$nbphase]=$phaseindex{$phase} . " " . $phase . " " . $temp . " " . join(" ",map($conc{uc $_},@elem));
+		$allphase[$nbphase]=$phaseindex{$phase};
+		$nbphase++;
+		$line=<$oh>;
+	    }
+	    if ( $bad == 0 ) {
+		if ($nbphase>1) {
+		    my $multiphase=join(",",sort @allphase);
+		    for (my $i=0; $i<$nbphase; $i++) {
+			$ptbyphase[$allphase[$i]] = $ptbyphase[$allphase[$i]] . $multiphase . " " . $equil[$i] . "\n";
+			$tielines = $tielines . $multiphase . " " . $equil[$i] . "\n";
+		    }
+		    $tielines = $tielines . "\n";
+		}
+	    }
+	    $bad=0;
+	}
+    }
+
+    for my $ph (keys %phaseindex) {
+	if (length($ptbyphase[$phaseindex{$ph}]) == 0) {
+	    delete $phaseindex{$ph};
+	}
+    }
+    
+    for my $ph (keys %phaseindex) {
+	open(my $phh,">","phase_" . $ph . ".dat");
+	if ( (@elem-1 + ($tempmin == $tempmax ? 0 : 1)) == 2 ) {
+	    my $orderedpt=reorderpoints($tempmax-$tempmin,$pttoofar,$ptbyphase[$phaseindex{$ph}]);
+	    print $phh $orderedpt;
+	}
+	else {
+	    for (my $ph2=0; $ph2<=$curphaseindex; $ph2++) {
+		for (my $ph1=0; $ph1<$ph2; $ph1++ ) {
+		    my $picked_phases=pick_phase($ptbyphase[$phaseindex{$ph}],$ph1,$ph2);
+		    if (length($picked_phases)>0) {
+			print $phh $picked_phases;
+			print $phh "\n";
+		    }
+		}
+	    }
+	}
+	close($phh);
+    }
+    {
+	open(my $tih,">","tielines.dat");
+	print $tih $tielines;
+	close($tih);
+    }
+   
+    {
+	open(my $gnh,">","ocplotpd.gnu");
+	my $tielinecolor='lc rgbcolor "light-gray"';
+	if (exists $cmdline{"-nt"}) {
+	    $tielinecolor='lc rgbcolor "white"';
+	}
+	my $tiefile="tielines.dat";
+	if (exists $cmdline{"-1f"}) {
+	    $tiefile="-";
+	}
+	print $gnh "";
+	if (@elem==2) {
+	    print $gnh "set xlabel '$elem[1]'\n";
+	    print $gnh "set ylabel 'T (K)'\n";
+	    print $gnh "plot [0:1] [] ";
+	    print $gnh "'" . $tiefile ."' u 6:4 w l $tielinecolor notitle";
+	    for my $ph (keys %phaseindex) {
+		print $gnh ", \\\n";
+		my $filename="phase_" . $ph . ".dat";
+		if (exists $cmdline{"-1f"}) {
+		    $filename="-";
+		}
+		print $gnh "'" . $filename . "' u 6:4 w l t '" . escape_bad($ph) . "'";
+	    }
+	}
+	elsif (@elem==3) {
+	    if ($tempmin == $tempmax) {
+		print $gnh "unset border\nunset tics\n";
+		print $gnh "set size square 1,1\n";
+		print $gnh "set lmargin 4\n";
+		print $gnh "set rmargin 2\n";
+		print $gnh "set tmargin 4\n";
+		print $gnh "set bmargin 1\n";
+		print $gnh "set label 'T=$tempmin K' at 0.05,0.866\n";
+		print $gnh "set label '$elem[0]' at -0.05,0\n";
+		print $gnh "set label '$elem[1]' at 1.05,0\n";
+		print $gnh "set label '$elem[2]' at 0.5,0.866+0.05\n";
+		print $gnh "set arrow from 0,0 to 1,0 nohead\n";
+		print $gnh "set arrow from 1,0 to 0.5,0.866 nohead\n";
+		print $gnh "set arrow from 0.5,0.866 to 0,0 nohead\n";
+		print $gnh "plot [0:1] [0:0.866] ";
+		print $gnh "'" . $tiefile . "' u (\$6+0.5*\$7):(0.866*\$7) w l $tielinecolor notitle";
+		for my $ph (keys %phaseindex) {
+		    print $gnh ", \\\n";
+		    my $filename="phase_" . $ph . ".dat";
+		    if (exists $cmdline{"-1f"}) {
+			$filename="-";
+		    }
+		    print $gnh "'" . $filename . "' u (\$6+0.5*\$7):(0.866*\$7) w l t '" . escape_bad($ph) . "'";
+		}
+	    }
+	    else {
+		if (exists $cmdline{"-vtk"}) {
+		    my $zscale=($tempmax-$tempmin);
+		    my $allscaling="-zmin=$tempmin -zmax=$tempmax -zscale=$zscale";
+		    system("mkaxes -tri -col=0 $allscaling > axes.vtk");
+		    system("mkaxes -tri -col=0 $allscaling -vl=" . join(',',@elem) . "> labels.vtk");
+		    system("awk '{print \$4,\$5,\$6,\$7}' $tiefile | mkaxes -trans -tri $allscaling | simplexize -t=- -l -col=0  > tielines.vtk");
+		    my $color=1;
+		    for my $ph (keys %phaseindex) {
+			my $filename="phase_" . $ph . ".dat";
+			my $vtkfilename="phase_" . $ph . ".vtk";
+			system("awk '{print \$4,\$5,\$6,\$7}' $filename | mkaxes -trans -tri $allscaling | simplexize -t=- -rmin=1e-2 -rmax=0.1 -col=$color > $vtkfilename");
+			$color++;
+		    }
+		}
+		else {
+		    my $tempmid=($tempmin+$tempmax)/2;
+		    print $gnh "unset border\nunset tics\n";
+		    print $gnh "set size square 1,1\n";
+		    print $gnh "set label '$elem[0]' at -0.05,0,$tempmid\n";
+		    print $gnh "set label '$elem[1]' at 1.05,0,$tempmid\n";
+		    print $gnh "set label '$elem[2]' at 0.5,0.866+0.05,$tempmid\n";
+		    print $gnh "set arrow from 0,0,$tempmin to 1,0,$tempmin nohead\n";
+		    print $gnh "set arrow from 1,0,$tempmin to 0.5,0.866,$tempmin nohead\n";
+		    print $gnh "set arrow from 0.5,0.866,$tempmin to 0,0,$tempmin nohead\n";
+		    print $gnh "set arrow from 0,0,$tempmax to 1,0,$tempmax nohead\n";
+		    print $gnh "set arrow from 1,0,$tempmax to 0.5,0.866,$tempmax nohead\n";
+		    print $gnh "set arrow from 0.5,0.866,$tempmax to 0,0,$tempmax nohead\n";
+		    print $gnh "set arrow from 0,0,$tempmin to 0,0,$tempmax nohead\n";
+		    print $gnh "set arrow from 1,0,$tempmin to 1,0,$tempmax nohead\n";
+		    print $gnh "set arrow from 0.5,0.866,$tempmin to 0.5,0.866,$tempmax nohead\n";
+		    print $gnh "set label '$tempmin K' at -0.15,0,$tempmin\n";
+		    print $gnh "set label '$tempmax K' at -0.15,0,$tempmax\n";
+		    print $gnh "splot [0:1] [0:0.866] [$tempmin:$tempmax]";
+		    print $gnh "'" . $tiefile . "' u (\$6+0.5*\$7):(0.866*\$7):(\$4) w l $tielinecolor notitle";
+		    for my $ph (keys %phaseindex) {
+			print $gnh ", \\\n";
+			my $filename="phase_" . $ph . ".dat";
+			if (exists $cmdline{"-1f"}) {
+			    $filename="-";
+			}
+			print $gnh "'" . $filename . "' u (\$6+0.5*\$7):(0.866*\$7):(\$4) w p t '" . escape_bad($ph) . "'";
+		    }
+		}
+	    }
+	}
+	elsif (@elem==4) {
+	    if (exists $cmdline{"-vtk"}) {
+		system("mkaxes -tetra -col=0 > axes.vtk");
+		system("mkaxes -tetra -col=0 -vl=" . join(',',@elem) . "> labels.vtk");
+		system("awk '{print \$4,\$5,\$6,\$7,\$8}' $tiefile | mkaxes -trans -tetra | simplexize -t=- -l -col=0  > tielines.vtk");
+		my $color=1;
+		for my $ph (keys %phaseindex) {
+		    my $filename="phase_" . $ph . ".dat";
+		    my $vtkfilename="phase_" . $ph . ".vtk";
+		    system("awk '{print \$4,\$5,\$6,\$7,\$8}' $filename | mkaxes -trans -tetra | simplexize -t=- -rmin=1e-2 -rmax=0.1 -col=$color > $vtkfilename");
+		    $color++;
+		}
+	    }
+	    else {
+		print $gnh "unset border\nunset tics\n";
+		print $gnh "set size square 1,1\n";
+		print $gnh "set arrow from 0,0,0 to 1,0,0 nohead\n";
+		print $gnh "set arrow from 1,0,0 to 0.5,0.866,0 nohead\n";
+		print $gnh "set arrow from 0.5,0.866,0 to 0,0,0 nohead\n";
+		print $gnh "set arrow from 0,0,0 to 0.5,0.289,0.816 nohead\n";
+		print $gnh "set arrow from 1,0,0 to 0.5,0.289,0.816 nohead\n";
+		print $gnh "set arrow from 0.5,0.866,0 to 0.5,0.289,0.816 nohead\n";
+		print $gnh "set label '$elem[0]' at -0.05,-0.05,0\n";
+		print $gnh "set label '$elem[1]' at 1.05,-0.05,0\n";
+		print $gnh "set label '$elem[2]' at 0.5,0.866+0.05,0\n";
+		print $gnh "set label '$elem[3]' at 0.5,0.289,0.816+0.05\n";
+		print $gnh "splot [0:1] [0:0.866] [0:0.816] ";
+		print $gnh "'" . $tiefile . "' u (\$6+0.5*\$7+0.5*\$8):(0.866*\$7+0.289*\$8):(0.816*\$8) w l $tielinecolor notitle";
+		for my $ph (keys %phaseindex) {
+		    print $gnh ", \\\n";
+		    my $filename="phase_" . $ph . ".dat";
+		    if (exists $cmdline{"-1f"}) {
+			$filename="-";
+		    }
+		    print $gnh "'" . $filename . "' u (\$6+0.5*\$7+0.5*\$8):(0.866*\$7+0.289*\$8):(0.816*\$8) w p t '" . escape_bad($ph) . "'";
+		}
+	    }
+	}
+	else {
+	    die "Sorry, case not yet covered for plotting. The files phase_xxxx.dat may still be useful...";
+	    
+	}
+	print $gnh "\n";
+	if (exists $cmdline{"-1f"}) {
+	    copy_file_to_handle($gnh,"tielines.dat");
+	    unlink("tielines.dat");
+	    print $gnh "e\n";
+	    for my $ph (keys %phaseindex) {
+		my $filename="phase_" . $ph . ".dat";
+		copy_file_to_handle($gnh,$filename);
+		unlink($filename);
+		print $gnh "e\n";
+	    }
+	}
+	print $gnh "pause -1\n";
+	close($gnh);
+	print "You can now run:\n gnuplot ocplotpd.gnu\n";
+    }
+}

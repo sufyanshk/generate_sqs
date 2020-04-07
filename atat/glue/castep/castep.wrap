@@ -1,0 +1,12 @@
+[cell]
+kpoints_mp_spacing = 0.04
+symmetry_generate
+snap_to_symmetry
+
+[param]
+task = Geometry Optimisation
+basis_precision = precise
+grid_scale = 2.0
+fine_grid_scale = 3.0
+elec_energy_tol = 0.0000001 eV
+geom_max_iter = 50
