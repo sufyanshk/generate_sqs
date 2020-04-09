@@ -22,5 +22,5 @@ make install
 ````
 
 # Disclaimer
-I have downloaded the ATAT code from [ATAT's official website](https://www.brown.edu/Departments/Engineering/Labs/avdw/atat/).\
+I have downloaded the ATAT code from ATAT's [official website](https://www.brown.edu/Departments/Engineering/Labs/avdw/atat/).\
 No copyright infringement intended.
