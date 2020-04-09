@@ -3,8 +3,7 @@
 
 I suggest to install ATAT in the `/bin/` directory so that all the users can use it. If you don't edit the `makefile` of ATAT then only the user who installed it, can use it.  
 Execute these commands sequentially:
-````
-bash  
+````shell
 bash  
 cd atat  
 (if OSX) sed -i '' '1s/\$(HOME)//' makefile  
