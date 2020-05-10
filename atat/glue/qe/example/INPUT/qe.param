@@ -1,7 +1,0 @@
-# The rule for make atomic_species card:
-# set the ppXXX as the name of certain line
-# then, write down the elemental symbol, mass
-# and pseudo-potential name info.
-
-ppW     W   183.80   W.GTH_LDA.UPF
-ppMo    Mo  12.011   Mo.GTH_LDA.UPF

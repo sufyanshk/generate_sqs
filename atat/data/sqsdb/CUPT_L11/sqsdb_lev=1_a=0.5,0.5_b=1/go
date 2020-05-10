@@ -1,5 +1,0 @@
-mcsqs.exe -2=2.05 -3=1.6 -4=1.5
-mcsqs.exe -n=32 -wd=2 -wn=0.75 -wr=2
-
-cat ../sqsdb_lev\=1_a\=1_b\=0.5\,0.5/bestsqs.out | cellcvrt.exe  -sh=0,0,0.5  -wi | sed -e 's/b_/c_/g' -e 's/a_/b_/g' | sed 's/c_/a_/g' > bestsqs.out
-cp ../sqsdb_lev\=1_a\=1_b\=0.5\,0.5/bestcorr.out .

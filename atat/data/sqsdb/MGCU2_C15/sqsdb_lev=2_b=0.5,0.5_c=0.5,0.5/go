@@ -1,3 +1,0 @@
-#!/bin/bash
-corrdump -nop -noe -2=0.85 -3=0.63 -4=0.63 -ro -l=rndstr.in  -clus
-getclus

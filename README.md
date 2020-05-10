@@ -1,8 +1,8 @@
 # ATAT installation
-(This is just a copy of the Alloy Theoretic Automated Toolkit (ATAT) for my own reference.)
+(This is just a copy of the **Alloy Theoretic Automated Toolkit (ATAT)** and **Atomsk** for my own reference.)
 
-I suggest to install ATAT in the `/bin/` directory so that all the users can use it. If you don't edit the `makefile` of ATAT then only the user who installed it, can use it.  
-Execute these commands sequentially:
+I suggest to install `ATAT` in the `/bin/` directory so that all the users can use it. If you don't edit the `makefile` of ATAT then only the user who installed it, can use it.  
+Execute these commands sequentially (so that all the users will be able to use `ATAT`):
 ````shell
 bash
 cd atat  
@@ -16,6 +16,13 @@ I have added a file named `check_sqs.sh` which checks whether the `Perfect_match
 
 In the `check_sqs.sh` file you can define for how many seconds the `mcsqs` code should keep finding out the sqs'es. (I have put the default as 172800 seconds which is equal to 2 days)
 
+# `rndstr.in` file from POSCAR generate from `Atomsk`
+For generating supercell of specific dimensions, `mcsqs` requires `rndstr.in` file of the required supercell.  
+The file `make_rndstr.in` file edit the POSCAR file generated from `atomsk` code and generates the `rndstr.in` file.  
+This file can then be given as input to `mcsqs` to generate the SQS of required dimensions.  
+(Note: All the atomic sites should be given the relative concentration of the chemical species in the `rndstr.in` file according to the alloy chemistry.)
+
 # Disclaimer
-I have downloaded the ATAT code from ATAT's [official website](https://www.brown.edu/Departments/Engineering/Labs/avdw/atat/).  
+The `ATAT` code can be downloaded from ATAT's [official website](https://www.brown.edu/Departments/Engineering/Labs/avdw/atat/).  
+The `Atomsk` code can be downloaded from Atomsk's [official website](https://atomsk.univ-lille.fr/dl.php).  
 No copyright infringement intended.

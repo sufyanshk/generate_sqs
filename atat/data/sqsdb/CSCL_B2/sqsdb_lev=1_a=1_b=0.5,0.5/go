@@ -1,2 +1,0 @@
-#!/bin/sh
-corrdump -nop -noe -2=10 -3=6 -4=6 -ro -l=rndstr.in  -clus ; getclus

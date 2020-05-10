@@ -1,6 +1,0 @@
-0 y z a
-0 -y z+1/2 a
-x y z b
--x -y z+1/2 b
-x -y z+1/2 b
--x y z b

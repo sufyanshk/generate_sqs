@@ -1,4 +1,0 @@
-#!/bin/csh
-awk '{if (split($0,a)==4) {print $0 > "tosort.tmp"} else {print $0;}}'
-sort -k 4 tosort.tmp
-rm tosort.tmp

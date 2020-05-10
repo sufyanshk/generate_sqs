@@ -1,6 +1,0 @@
-0 0 z a
-1/3 2/3 z b
-2/3 1/3 z c
-x y z d
--y x-y z d
--x+y -x z d

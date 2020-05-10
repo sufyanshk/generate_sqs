@@ -1,9 +1,0 @@
-#!/bin/bash
-corrdump.exe -2=0.8 -clus -nop -noe -ro -l=rndstr.in
-(echo 1 ; cat supcel.in) > sqscell.out
-mcsqs -rc -n=27
-if [[ ! -e bestsqs.in ]]
-then
-    mv bestsqs.out bestsqs.in
-fi
-cat bestsqs.in | cellcvrt.exe -ja=0.05  > bestsqs.out

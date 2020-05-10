@@ -1,2 +1,0 @@
-#const a=; b=; c=; alpha=; beta=; gamma=;
-{a} {b} {c} {alpha} {beta} {gamma}

@@ -1,3 +1,0 @@
-x 0 z a
-x y z b
-x -y z b

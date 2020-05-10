@@ -1,5 +1,0 @@
-This example is for the test of the interface between ATAT and Quantum-ESPRESSO code using Mo-W binary alloy in BCC structure.
-
-LDA-PZ is used as xc-functional and pseudo-potentials are generated in Goedecker/Hartwigsen/Hutter/Teter scheme. (ref.: Phys.Rev.B58, 3641 (1998); B54, 1703 (1996))
-
-The data and figures shown in "Result" directory are not the final converged results of calculation.

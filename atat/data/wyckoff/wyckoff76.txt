@@ -1,4 +1,0 @@
-x y z a
--x -y z+1/2 a
--y x z+1/4 a
-y -x z+3/4 a
