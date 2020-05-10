@@ -1,3 +1,5 @@
+#Copyright 2020 (C) Sufyan M. Shaikh
+#!/bin/bash
 #set time counter=0
 t=0
 
