@@ -12,7 +12,7 @@ make
 make install  
 ````
 
-#Generate POSCAR from `Atomsk`
+# Generate POSCAR from `Atomsk`
 ````shell
 #will create bcc W unit cell and will orient it along xyz, abc, pqr directions
 atomsk --create bcc 4 W orient [x y z] [a b c] [p q r]pos
