@@ -15,7 +15,7 @@ make install
 # Generate POSCAR file using Atomsk
 ````shell
 #will create bcc W unit cell and will orient it along xyz, abc, pqr directions
-atomsk --create bcc 4 W orient [x y z] [a b c] [p q r]pos
+atomsk --create bcc 4 W orient [x y z] [a b c] [p q r] pos
 
 #will duplicate the unit cell along its axes
 atomsk POSCAR -duplicate 2 2 2 # repeat the unit cell twice in x, y and z directions
