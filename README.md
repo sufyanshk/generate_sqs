@@ -1,5 +1,5 @@
 # ATAT installation
-(ATAT and Atomsk should be downloaded from their respective websites given in the **Dislcaimer** section.)
+(ATAT and Atomsk should be downloaded from their respective websites given in the **Dislcaimer** section. Other interesting repositories can be found on my personal website: <a href="https://sufyanshk.github.io/">sufyanshk.github.io</a>)
 
 I suggest to install `ATAT` in the `/bin/` directory so that all the users can use it. If you don't edit the `makefile` of ATAT then only the user who installed it, can use it.  
 Execute these commands sequentially (so that all the users will be able to use `ATAT`):
