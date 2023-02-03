@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Shaikh"
+  given-names: "Sufyan M."
+  orcid: "https://orcid.org/0000-0002-5576-7554"
+- family-names: "Murty"
+  given-names: "B. S."
+  orcid: "https://orcid.org/0000-0002-4399-8531"
+- family-names: "Yadav"
+  given-names: "Satyesh K."
+  orcid: "https://orcid.org/0000-0002-6308-6070"
+title: "BaderPostProcess"
+version: 1.0.0
+date-released: 2023-02-03
+url: "https://github.com/sufyanshk/generate_sqs"
