@@ -1,5 +1,14 @@
 theme: jekyll-theme-cayman
-google_analytics: G-S556EWEVXE
+#google_analytics: G-S556EWEVXE
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-S556EWEVXE"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-S556EWEVXE');
+</script>
 plugins:
   - jekyll-seo-tag
   - jekyll-sitemap
